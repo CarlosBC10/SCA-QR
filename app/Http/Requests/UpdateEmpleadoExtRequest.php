@@ -3,10 +3,11 @@
 //
 // Valida la edición individual de empleados_ext_sca.
 // Se usa para:
-//   - Corregir la planta mal asignada (por auto-habilitación errónea)
 //   - Cambiar el tipo_empleado de un caso especial (override)
 //   - Resetear el contador de búsquedas manuales (si se le repuso credencial)
 //   - Desbloquear manualmente al empleado
+//
+// CAMBIO: planta_id ya NO se valida ni se guarda. Se deriva de sitec.
 
 namespace App\Http\Requests;
 
@@ -21,8 +22,7 @@ class UpdateEmpleadoExtRequest extends FormRequest
     {
         return [
             'tipo_empleado'   => ['required', Rule::in(['operativo', 'administrativo', 'corporativo'])],
-            'planta_id'       => ['required', 'integer', 'exists:plantas,id'],
-            // resetear_manual: si viene '1', se reinicia el contador a 4 y se desbloquea
+            // ELIMINADO: 'planta_id' — se deriva de sitec
             'resetear_manual' => ['nullable', 'boolean'],
         ];
     }
@@ -32,8 +32,6 @@ class UpdateEmpleadoExtRequest extends FormRequest
         return [
             'tipo_empleado.required' => 'El tipo de empleado es obligatorio.',
             'tipo_empleado.in'       => 'El tipo de empleado no es válido.',
-            'planta_id.required'     => 'La planta es obligatoria.',
-            'planta_id.exists'       => 'La planta seleccionada no es válida.',
         ];
     }
 }

@@ -15,6 +15,7 @@
     $puestosSinClasificar = $puestosTotales - $puestosClasificados;
 @endphp
 
+{{-- Stats Cards --}}
 <div class="row g-4 mb-4">
     <div class="col-xl-3 col-md-6 animate-fade-in-up" style="animation-delay: 0.1s;">
         <div class="card card-hover border-0 h-100" style="border-radius: 16px; overflow: hidden;">
@@ -85,52 +86,11 @@
     </div>
 </div>
 
-<div class="row g-4">
+{{-- NUEVA FILA: Personas dentro + Alertas --}}
+<div class="row g-4 mb-4">
     <div class="col-lg-8 animate-fade-in-up" style="animation-delay: 0.5s;">
-        <div class="card border-0 h-100" style="border-radius: 16px;">
-            <div class="card-header bg-transparent py-4 px-4 border-0">
-                <h5 class="mb-0 fw-bold"><i class="bi bi-lightning-charge-fill text-success me-2"></i> Accesos Rápidos</h5>
-            </div>
-            <div class="card-body px-4 pb-4">
-                <div class="row g-3">
-                    <div class="col-md-4">
-                        <a href="{{ route('usuarios.index') }}" class="text-decoration-none">
-                            <div class="border-0 p-4 text-center bg-light rounded-3 h-100 d-flex flex-column align-items-center justify-content-center transition-all" style="transition: all 0.3s;">
-                                <div class="rounded-circle d-flex align-items-center justify-content-center mb-3" style="width: 50px; height: 50px; background: white;">
-                                    <i class="bi bi-people text-success fs-4"></i>
-                                </div>
-                                <span class="fw-bold text-dark">Gestionar Usuarios</span>
-                                <small class="text-muted mt-1">Cuentas y roles</small>
-                            </div>
-                        </a>
-                    </div>
-                    <div class="col-md-4">
-                        <a href="{{ route('empleados.index') }}" class="text-decoration-none">
-                            <div class="border-0 p-4 text-center bg-light rounded-3 h-100 d-flex flex-column align-items-center justify-content-center transition-all" style="transition: all 0.3s;">
-                                <div class="rounded-circle d-flex align-items-center justify-content-center mb-3" style="width: 50px; height: 50px; background: white;">
-                                    <i class="bi bi-person-badge text-success fs-4"></i>
-                                </div>
-                                <span class="fw-bold text-dark">Asignar Empleados</span>
-                                <small class="text-muted mt-1">Plantas y tipos</small>
-                            </div>
-                        </a>
-                    </div>
-                    <div class="col-md-4">
-                        <a href="{{ route('puestos.index') }}" class="text-decoration-none">
-                            <div class="border-0 p-4 text-center bg-light rounded-3 h-100 d-flex flex-column align-items-center justify-content-center transition-all" style="transition: all 0.3s;">
-                                <div class="rounded-circle d-flex align-items-center justify-content-center mb-3" style="width: 50px; height: 50px; background: white;">
-                                    <i class="bi bi-list-task text-success fs-4"></i>
-                                </div>
-                                <span class="fw-bold text-dark">Clasificar Puestos</span>
-                                <small class="text-muted mt-1">Configuración masiva</small>
-                            </div>
-                        </a>
-                    </div>
-                </div>
-            </div>
-        </div>
+        @include('partials._personas_dentro', ['id' => 'superadmin'])
     </div>
-    
     <div class="col-lg-4 animate-fade-in-up" style="animation-delay: 0.6s;">
         <div class="card border-0 h-100" style="border-radius: 16px; background: linear-gradient(135deg, #2e7d32, #1b5e20);">
             <div class="card-body p-4 text-white">
@@ -152,6 +112,65 @@
                     <p class="mt-2 mb-0 fw-bold">Todo en orden</p>
                 </div>
                 @endif
+            </div>
+        </div>
+    </div>
+</div>
+
+{{-- Accesos Rápidos --}}
+<div class="row g-4">
+    <div class="col-12 animate-fade-in-up" style="animation-delay: 0.7s;">
+        <div class="card border-0" style="border-radius: 16px;">
+            <div class="card-header bg-transparent py-4 px-4 border-0">
+                <h5 class="mb-0 fw-bold"><i class="bi bi-lightning-charge-fill text-success me-2"></i> Accesos Rápidos</h5>
+            </div>
+            <div class="card-body px-4 pb-4">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <a href="{{ route('usuarios.index') }}" class="text-decoration-none">
+                            <div class="border-0 p-4 text-center bg-light rounded-3 h-100 d-flex flex-column align-items-center justify-content-center transition-all" style="transition: all 0.3s;">
+                                <div class="rounded-circle d-flex align-items-center justify-content-center mb-3" style="width: 50px; height: 50px; background: white;">
+                                    <i class="bi bi-people text-success fs-4"></i>
+                                </div>
+                                <span class="fw-bold text-dark">Gestionar Usuarios</span>
+                                <small class="text-muted mt-1">Cuentas y roles</small>
+                            </div>
+                        </a>
+                    </div>
+                    <div class="col-md-3">
+                        <a href="{{ route('empleados.index') }}" class="text-decoration-none">
+                            <div class="border-0 p-4 text-center bg-light rounded-3 h-100 d-flex flex-column align-items-center justify-content-center transition-all" style="transition: all 0.3s;">
+                                <div class="rounded-circle d-flex align-items-center justify-content-center mb-3" style="width: 50px; height: 50px; background: white;">
+                                    <i class="bi bi-person-badge text-success fs-4"></i>
+                                </div>
+                                <span class="fw-bold text-dark">Ver Empleados</span>
+                                <small class="text-muted mt-1">Listado y clasificación</small>
+                            </div>
+                        </a>
+                    </div>
+                    <div class="col-md-3">
+                        <a href="{{ route('puestos.index') }}" class="text-decoration-none">
+                            <div class="border-0 p-4 text-center bg-light rounded-3 h-100 d-flex flex-column align-items-center justify-content-center transition-all" style="transition: all 0.3s;">
+                                <div class="rounded-circle d-flex align-items-center justify-content-center mb-3" style="width: 50px; height: 50px; background: white;">
+                                    <i class="bi bi-list-task text-success fs-4"></i>
+                                </div>
+                                <span class="fw-bold text-dark">Clasificar Puestos</span>
+                                <small class="text-muted mt-1">Configuración masiva</small>
+                            </div>
+                        </a>
+                    </div>
+                    <div class="col-md-3">
+                        <a href="{{ route('clasificaciones.index') }}" class="text-decoration-none">
+                            <div class="border-0 p-4 text-center bg-light rounded-3 h-100 d-flex flex-column align-items-center justify-content-center transition-all" style="transition: all 0.3s;">
+                                <div class="rounded-circle d-flex align-items-center justify-content-center mb-3" style="width: 50px; height: 50px; background: white;">
+                                    <i class="bi bi-diagram-3 text-success fs-4"></i>
+                                </div>
+                                <span class="fw-bold text-dark">Clasificaciones</span>
+                                <small class="text-muted mt-1">Mapeo a plantas</small>
+                            </div>
+                        </a>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

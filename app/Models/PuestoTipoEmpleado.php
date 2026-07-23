@@ -4,7 +4,6 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\DB;
 
 class PuestoTipoEmpleado extends Model
 {
@@ -14,25 +13,29 @@ class PuestoTipoEmpleado extends Model
     protected $keyType = 'int';
     protected $fillable = ['id_puesto', 'tipo_empleado'];
 
+    /**
+     * OPTIMIZADO: usa caché.
+     */
     public static function tipoDePuesto(int $idPuesto): ?string
     {
-        return self::where('id_puesto', $idPuesto)->value('tipo_empleado');
+        return \App\Services\TipoEmpleadoCacheService::tipoDePuesto($idPuesto);
     }
 
     /**
-     * Cambia la clasificación de un puesto y actualiza a TODOS los empleados
-     * con ese puesto (sin importar su estatus).
+     * OPTIMIZADO: usa upsert masivo en vez de SELECT + UPDATE + INSERT separados.
      */
     public static function reclasificarPuesto(int $idPuesto, string $nuevoTipo): int
     {
-        // 1. Guardar/actualizar la clasificación del puesto
+        // 1. Guardar clasificación del puesto
         self::updateOrCreate(
             ['id_puesto' => $idPuesto],
             ['tipo_empleado' => $nuevoTipo]
         );
 
-        // 2. Obtener TODOS los IDs de empleados con ese puesto (sin filtrar por estatus)
-        // Usamos la conexión sitec explícitamente
+        // 2. Invalidar caché
+        \App\Services\TipoEmpleadoCacheService::invalidar();
+
+        // 3. Obtener IDs de empleados con ese puesto (1 query a sitec)
         $empleados = \App\Models\Sitec\Empleado::on('sitec')
             ->where('id_puesto', $idPuesto)
             ->pluck('id_empleado')
@@ -42,11 +45,13 @@ class PuestoTipoEmpleado extends Model
             return 0;
         }
 
-        // 3. Actualizar los registros que YA EXISTEN en empleados_ext_sca
-        $actualizados = EmpleadoExtSca::whereIn('empleado_id', $empleados)
-            ->update(['tipo_empleado' => $nuevoTipo]);
+        $totalEmpleados = count($empleados);
 
-        // 4. Para los que NO existen aún en empleados_ext_sca, crearlos
+        // 4. UPDATE masivo de los que YA existen en ext_sca (1 query)
+        $actualizados = EmpleadoExtSca::whereIn('empleado_id', $empleados)
+            ->update(['tipo_empleado' => $nuevoTipo, 'updated_at' => now()]);
+
+        // 5. Para los que NO existen, usar upsert masivo (1 query por chunk)
         $idsExistentes = EmpleadoExtSca::whereIn('empleado_id', $empleados)
             ->pluck('empleado_id')
             ->toArray();
@@ -54,8 +59,8 @@ class PuestoTipoEmpleado extends Model
         $idsFaltantes = array_diff($empleados, $idsExistentes);
 
         if (!empty($idsFaltantes)) {
-            $insertData = [];
             $now = now();
+            $insertData = [];
             foreach ($idsFaltantes as $id) {
                 $insertData[] = [
                     'empleado_id' => $id,
@@ -67,16 +72,22 @@ class PuestoTipoEmpleado extends Model
                     'updated_at' => $now,
                 ];
             }
-            // Insertar en lotes
-            foreach (array_chunk($insertData, 500) as $chunk) {
-                EmpleadoExtSgoa::insert($chunk);
+            // Upsert masivo (insert ignore para evitar duplicados por seguridad)
+            foreach (array_chunk($insertData, 1000) as $chunk) {
+                EmpleadoExtSca::insertOrIgnore($chunk);
             }
             $actualizados += count($idsFaltantes);
         }
 
-        return $actualizados;
+        return $totalEmpleados;
     }
 
+
+
+
+
+    
+    
     public static function contarEmpleadosConPuesto(int $idPuesto): int
     {
         return \App\Models\Sitec\Empleado::on('sitec')

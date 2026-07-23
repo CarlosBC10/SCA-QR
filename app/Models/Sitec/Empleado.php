@@ -1,8 +1,5 @@
 <?php
 // app/Models/Sitec/Empleado.php
-//
-// Representa sitec.empleados (solo lectura).
-// Permisos de lectura ACTUALES: empleados, puestos, turnos, departamentos.
 
 namespace App\Models\Sitec;
 
@@ -38,33 +35,84 @@ class Empleado extends Model
         'fecha_baja'              => 'date',
     ];
 
-    // ¿el empleado está activo (puede login)?
     public function estaActivo(): bool
     {
         return $this->estatus === 'Alta';
     }
 
-    // tipo de empleado: 1) override en ext, 2) mapeo por puesto, 3) null
+    /**
+     * OPTIMIZADO: usa caché para el mapeo puesto→tipo.
+     */
     public function tipoEmpleado(): ?string
     {
-        $ext = $this->ext();
+        // 1. Override en ext_sca
+        $ext = $this->extRecord();
         if ($ext && $ext->tipo_empleado) {
             return $ext->tipo_empleado;
         }
-        return \App\Models\PuestoTipoEmpleado::tipoDePuesto($this->id_puesto);
+        // 2. Mapeo por puesto (cacheado)
+        return \App\Services\TipoEmpleadoCacheService::tipoDePuesto($this->id_puesto);
     }
 
     public function esCorporativo(): bool    { return $this->tipoEmpleado() === 'corporativo'; }
     public function esOperativo(): bool      { return $this->tipoEmpleado() === 'operativo'; }
     public function esAdministrativo(): bool { return $this->tipoEmpleado() === 'administrativo'; }
 
+        // ============================================================
+    // ACCESSOR para ext (reemplaza al hasOne)
+    // ============================================================
+    // ELIMINAMOS el método ext() hasOne porque Laravel ejecuta el query
+    // en la conexión del padre (sitec) y el usuario no tiene permisos.
+    // En su lugar, este accessor usa extRecord() que fuerza la conexión mysql.
+    //
+    // Así, $empleado->ext funciona en cualquier contexto (vistas, controladores)
+    // sin riesgo de ejecutar queries en la BD equivocada.
+
+    /**
+     * Devuelve el registro ext (usa conexión correcta mysql).
+     * Si fue precargado con setRelation('ext', ...), lo devuelve sin query.
+     */
+    public function getExtAttribute()
+    {
+        return $this->extRecord();
+    }
+
+    /**
+     * Helper: obtiene el registro ext sin re-ejecutar query si ya fue cargado.
+     */
+    public function extRecord(): ?\App\Models\EmpleadoExtSca
+    {
+        if (array_key_exists('ext', $this->relations)) {
+            return $this->getRelation('ext');
+        }
+        return \App\Models\EmpleadoExtSca::on('mysql')
+            ->where('empleado_id', $this->id_empleado)
+            ->first();
+    }
 
     // ============================================================
-    // RELACIONES CON CATÁLOGOS DE sitec (ACTIVAS en M2)
+    // RELACIÓN CON CLASIFICACIONES
     // ============================================================
-    // Ahora tenemos permiso de lectura sobre puestos, turnos y departamentos.
-    // Estas relaciones SÍ funcionan con belongsTo porque están en la
-    // misma conexión (sitec).
+    public function clasificacion()
+    {
+        return $this->belongsTo(Clasificacion::class, 'id_clasificacion', 'id_clasificacion');
+    }
+
+    /**
+     * OPTIMIZADO: usa caché del mapeo clasificacion→planta.
+     */
+    public function plantaId(): ?int
+    {
+        return \App\Services\PlantaCacheService::plantaDeClasificacion($this->id_clasificacion);
+    }
+
+    /**
+     * OPTIMIZADO: usa caché de plantas.
+     */
+    public function plantaNombre(): string
+    {
+        return \App\Services\PlantaCacheService::nombrePlanta($this->plantaId());
+    }
 
     public function departamento()
     {
@@ -79,5 +127,23 @@ class Empleado extends Model
     public function turno()
     {
         return $this->belongsTo(Turno::class, 'id_turno');
+    }
+
+    // ============================================================
+    // SCOPES OPTIMIZADOS
+    // ============================================================
+
+    public function scopeActivos($query)
+    {
+        return $query->where('estatus', 'Alta');
+    }
+
+    public function scopeBuscar($query, string $q)
+    {
+        if (!$q) return $query;
+        return $query->where(function ($sub) use ($q) {
+            $sub->where('id_empleado', 'like', "%{$q}%")
+                 ->orWhere('nombre_completo', 'like', "%{$q}%");
+        });
     }
 }

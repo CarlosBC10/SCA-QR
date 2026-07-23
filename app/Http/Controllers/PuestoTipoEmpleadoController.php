@@ -19,15 +19,28 @@ use Illuminate\Http\Request;
 class PuestoTipoEmpleadoController extends Controller
 {
     /**
-     * LISTA de puestos con su clasificación actual.
-     * GET /puestos
+     * OPTIMIZADO: carga todos los conteos en 1 sola query agrupada.
+     * Antes hacía 192 AJAX (uno por puesto). Ahora hace 2 queries total.
      */
     public function index()
     {
+        // 1. Todos los puestos de sitec
         $puestos = Puesto::orderBy('nombre')->get();
+
+        // 2. Clasificaciones actuales (mapeo id_puesto => tipo)
         $clasificaciones = PuestoTipoEmpleado::pluck('tipo_empleado', 'id_puesto');
 
-        return view('puestos.index', compact('puestos', 'clasificaciones'));
+        // 3. NUEVO: conteo de empleados por puesto en UNA sola query agrupada
+        // Antes: 192 AJAX × 1 query = 192 queries a sitec
+        // Ahora: 1 query agrupada
+        $conteoEmpleados = \App\Models\Sitec\Empleado::on('sitec')
+            ->selectRaw('id_puesto, COUNT(*) as total')
+            ->where('estatus', 'Alta')
+            ->whereNotNull('id_puesto')
+            ->groupBy('id_puesto')
+            ->pluck('total', 'id_puesto');
+
+        return view('puestos.index', compact('puestos', 'clasificaciones', 'conteoEmpleados'));
     }
 
     /**

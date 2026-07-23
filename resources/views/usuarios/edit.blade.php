@@ -34,7 +34,7 @@
                 </div>
 
                 @if(!$usuario->guardia_id)
-                {{-- Empleado interno --}}
+                {{-- Empleado interno: planta derivada de sitec (no editable) --}}
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Tipo de Empleado</label>
                     <select name="tipo_empleado" class="form-select">
@@ -44,17 +44,36 @@
                         <option value="corporativo" @if(old('tipo_empleado', $tipoEmpleado)=='corporativo') selected @endif>Corporativo</option>
                     </select>
                 </div>
-                @endif
 
+                {{-- NUEVO: Planta read-only derivada de sitec --}}
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Planta base</label>
+                    @php
+                        $empleadoEdit = \App\Models\Sitec\Empleado::find($usuario->username);
+                        $plantaEdit = $empleadoEdit?->plantaId();
+                        $plantaEditNombre = $empleadoEdit?->plantaNombre();
+                    @endphp
+                    <div class="form-control bg-light" style="cursor: not-allowed;">
+                        @if($plantaEdit)
+                            <span class="badge bg-success">{{ $plantaEditNombre }}</span>
+                            <i class="bi bi-lock-fill text-muted ms-2"></i>
+                        @else
+                            <span class="badge bg-warning text-dark">Sin planta</span>
+                        @endif
+                    </div>
+                    <div class="form-text">Se asigna automáticamente desde sitec.</div>
+                </div>
+                @else
+                {{-- Guardia externo: planta editable --}}
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Planta asignada</label>
                     <select name="planta_id" class="form-select" required>
                         @foreach($plantas as $p)
                             <option value="{{ $p->id }}" @if(old('planta_id', $plantaActual)==$p->id) selected @endif>{{ $p->nombre }}</option>
                         @endforeach
                     </select>
-                    <div class="form-text">Todos los usuarios tienen planta base. Los corporativos acceden a todas las plantas según RN-01.</div>
                 </div>
+                @endif
 
                 <div class="col-12 mb-3">
                     <label class="form-label">Restablecer contraseña</label>

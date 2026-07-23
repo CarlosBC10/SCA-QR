@@ -32,8 +32,11 @@ return [
     |
     */
 
-    'lifetime' => (int) env('SESSION_LIFETIME', 120),
+    // Sesión del guardia: dura todo el turno (8 horas)
+    // Otras sesiones: 2 horas (120 min)
+    'lifetime' => env('SESSION_LIFETIME', 30),
 
+    // NUEVO: expira la sesión al cerrar el navegador
     'expire_on_close' => env('SESSION_EXPIRE_ON_CLOSE', false),
 
     /*

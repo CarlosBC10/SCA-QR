@@ -1,10 +1,5 @@
 <?php
 // app/Models/UsuarioSca.php
-//
-// Tabla usuarios_sca (autenticación web).
-// Username:
-//   - Empleados: id_empleado de sitec (ej: '1001')
-//   - Guardias: 'G-XXXXX' (5 dígitos)
 
 namespace App\Models;
 
@@ -36,46 +31,45 @@ class UsuarioSca extends Authenticatable
         return $this->hasMany(LogSistema::class, 'usuario_id');
     }
 
-    // Nombre completo (guardia o empleado)
+    /**
+     * OPTIMIZADO: cachea el empleado en la instancia para no repetir queries.
+     */
     public function getNombreCompletoAttribute(): string
     {
         if ($this->guardia_id) {
             return $this->guardia?->nombre_completo ?? 'Guardia sin nombre';
         }
-        $empleado = Empleado::find($this->username);
-        return $empleado?->nombre_completo ?? 'Empleado no encontrado';
-    }
-
-    // Nombre de la planta
-    public function getPlantaNombreAttribute(): string
-    {
-        if ($this->guardia_id && $this->guardia?->planta) {
-            return $this->guardia->planta->nombre;
+        // Cargar empleado una sola vez por instancia
+        if (!array_key_exists('_empleado_cached', $this->relations)) {
+            $emp = Empleado::find($this->username);
+            $this->setRelation('_empleado_cached', $emp);
         }
-        $ext = EmpleadoExtSca::with('planta')->find($this->username);
-        if ($ext && $ext->planta) {
-            return $ext->planta->nombre;
-        }
-        return 'Sin planta';
+        return $this->getRelation('_empleado_cached')?->nombre_completo ?? 'Empleado no encontrado';
     }
 
     /**
-     * NUEVO en M2: Obtiene el ID de la planta asignada al usuario.
-     * - Guardia: guardias.planta_id
-     * - Empleado: empleados_ext_sca.planta_id
-     *
-     * Se usa para el scoping del Aprobador (solo ve/edita usuarios de su planta).
+     * OPTIMIZADO: planta derivada de sitec con caché del mapeo.
      */
     public function getPlantaIdAttribute(): ?int
     {
         if ($this->guardia_id) {
             return $this->guardia?->planta_id;
         }
-        $ext = EmpleadoExtSca::find($this->username);
-        return $ext?->planta_id;
+        // Cargar empleado cacheado
+        if (!array_key_exists('_empleado_cached', $this->relations)) {
+            $this->setRelation('_empleado_cached', Empleado::find($this->username));
+        }
+        return $this->getRelation('_empleado_cached')?->plantaId();
     }
 
-    // Helpers de rol
+    public function getPlantaNombreAttribute(): string
+    {
+        if ($this->guardia_id && $this->guardia?->planta) {
+            return $this->guardia->planta->nombre;
+        }
+        return \App\Services\PlantaCacheService::nombrePlanta($this->planta_id);
+    }
+
     public function hasRole(string $rol): bool
     {
         return $this->rol?->nombre === $rol;

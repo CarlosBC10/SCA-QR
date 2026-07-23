@@ -108,7 +108,7 @@ class LoginController extends Controller
      * Validaciones en orden:
      * 1. Rate limiting (5 intentos/minuto por IP + username)
      * 2. Auth::attempt (username + password + usuarios_sca.activo=true)
-     * 3. Si es guardia: valida guardias.activo=true
+     * 3. Si es guardia: forzar remember_me (turnos largos) + valida guardias.activo=true
      * 4. Si es empleado: valida sitec.empleados.estatus='Alta'
      * 5. Auto-desactiva en sca si fue dado de baja
      * 6. Registra LOGIN en logs_sistema
@@ -127,8 +127,8 @@ class LoginController extends Controller
             ]);
         }
 
-        // --- INTENTO DE AUTENTICACIÓN ---
-        if (!Auth::attempt($credentials, $request->boolean('remember'))) {
+        // --- INTENTO DE AUTENTICACIÓN (sin remember aún) ---
+        if (!Auth::attempt($credentials, false)) {
             RateLimiter::hit($throttleKey, 60);
             throw ValidationException::withMessages([
                 'username' => 'Credenciales incorrectas o usuario inactivo.',
@@ -141,6 +141,7 @@ class LoginController extends Controller
         $usuario = Auth::user();
 
         // --- VALIDACIÓN CRUZADA (Guardia o Empleado) ---
+        // Se hace ANTES de forzar remember, por si el usuario está dado de baja
         if ($usuario->guardia_id !== null) {
             $guardia = $usuario->guardia;
             if (!$guardia || !$guardia->activo) {
@@ -158,6 +159,12 @@ class LoginController extends Controller
                 throw ValidationException::withMessages(['username' => 'El empleado no está activo en el sistema.']);
             }
         }
+
+        // --- REMEMBER ME SEGÚN ROL ---
+        // Guardias: forzado (turnos de 8-12h sin horario fijo)
+        // Demás roles: solo si marcaron el checkbox
+        $remember = $request->boolean('remember') || $usuario->isGuardia();
+        Auth::login($usuario, $remember);
 
         LogSistema::registrar('LOGIN', "Inicio de sesión de {$request->username}");
 

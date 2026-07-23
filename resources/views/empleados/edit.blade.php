@@ -1,7 +1,8 @@
 {{-- resources/views/empleados/edit.blade.php --}}
-{{-- 
+{{--
   VISTA: Editar Empleado
-  Muestra datos de sitec (read-only) y permite asignar planta/tipo en sca.
+  Muestra datos de sitec (read-only) y permite configurar tipo_empleado.
+  La planta se deriva automáticamente de sitec (no es editable).
   Permite resetear el contador de búsquedas manuales si está bloqueado.
 --}}
 @extends('layouts.app')
@@ -64,15 +65,25 @@
                     @endif
                 </div>
 
+                {{-- NUEVO: Planta derivada de sitec (read-only) --}}
                 <div class="col-md-6 mb-3">
-                    <label class="form-label">Planta base</label>
-                    <select name="planta_id" class="form-select" required>
-                        <option value="">— Seleccionar —</option>
-                        @foreach($plantas as $p)
-                            <option value="{{ $p->id }}" @if(old('planta_id', $ext->planta_id)==$p->id) selected @endif>{{ $p->nombre }}</option>
-                        @endforeach
-                    </select>
-                    <div class="form-text">Planta donde tiene su base. Los corporativos acceden a todas las plantas según RN-01.</div>
+                    <label class="form-label">Planta (derivada de sitec)</label>
+                    <div class="form-control bg-light" style="cursor: not-allowed;">
+                        @if($plantaDerivada)
+                            <span class="badge bg-success">{{ $plantaDerivadaNombre }}</span>
+                            <i class="bi bi-lock-fill text-muted ms-2" title="Se asigna automáticamente"></i>
+                        @else
+                            <span class="badge bg-warning text-dark">
+                                Sin planta (clasificación sin mapear)
+                            </span>
+                            <i class="bi bi-info-circle text-muted ms-2"
+                               title="Configure el mapeo en Clasificaciones → Plantas"></i>
+                        @endif
+                    </div>
+                    <div class="form-text">
+                        La planta se asigna automáticamente según la clasificación
+                        del empleado en sitec. No es editable.
+                    </div>
                 </div>
             </div>
 

@@ -1,9 +1,4 @@
 {{-- resources/views/empleados/index.blade.php --}}
-{{-- 
-  VISTA: Listado de Empleados (25,000+)
-  Consulta directamente sitec.empleados y hace LEFT JOIN con empleados_ext_sca (relación 'ext').
-  Así vemos a TODOS los empleados, tengan o no configuración.
---}}
 @extends('layouts.app')
 
 @section('title', 'Gestión de Empleados')
@@ -12,11 +7,10 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
         <h1 class="h3 mb-0">Gestión de Empleados</h1>
-        <p class="text-muted mb-0">Asigne planta y verifique la clasificación de los empleados</p>
+        <p class="text-muted mb-0">Verifique la clasificación y turno de los empleados</p>
     </div>
 </div>
 
-{{-- Buscador de empleados --}}
 <form method="GET" class="card border-0 shadow-sm mb-3">
     <div class="card-body">
         <div class="row g-2 align-items-end">
@@ -42,16 +36,16 @@
     </div>
 </form>
 
-{{-- Tabla de resultados --}}
 <div class="card border-0 shadow-sm">
     <div class="table-responsive">
-        <table class="table table-hover mb-0">
+        <table class="table table-hover mb-0 align-middle">
             <thead class="table-light">
                 <tr>
                     <th>ID</th>
                     <th>Nombre</th>
                     <th>Puesto</th>
                     <th>Departamento</th>
+                    <th>Turno</th>
                     <th>Planta</th>
                     <th>Tipo</th>
                     <th width="80">Acción</th>
@@ -59,23 +53,51 @@
             </thead>
             <tbody>
                 @forelse($empleados as $e)
+                @php
+                    $plantaDerivada = $e->plantaId();
+                    $plantaNombre = $e->plantaNombre();
+                    $turno = $e->turno;
+                @endphp
                 <tr>
                     <td class="font-monospace">{{ $e->id_empleado }}</td>
-                    <td>{{ $e->nombre_completo }}</td>
+                    <td class="fw-semibold">{{ $e->nombre_completo }}</td>
                     <td>{{ $e->puesto?->nombre ?? '—' }}</td>
                     <td>{{ $e->departamento?->nombre ?? '—' }}</td>
                     <td>
-                        {{-- Si tiene planta asignada, la mostramos. Si no, avisamos que falta asignar --}}
-                        @if($e->ext?->planta_id)
-                            <span class="badge bg-success">{{ $e->ext->planta->nombre }}</span>
+                        @if($turno)
+                            <span class="badge bg-light text-dark border" title="{{ $turno->entrada }} - {{ $turno->salida }}">
+                                <i class="bi bi-clock"></i> {{ $turno->nombre }}
+                            </span>
+                            <div class="small text-muted">{{ $turno->entrada }} - {{ $turno->salida }}</div>
                         @else
-                            <span class="badge bg-warning text-dark">Sin asignar</span>
+                            <span class="text-muted">—</span>
                         @endif
                     </td>
+                    
                     <td>
-                        {{-- Si tiene tipo, lo mostramos. Si no, avisamos que no está clasificado --}}
+                        @php
+                            // OPTIMIZADO: usar valores precalculados en el controlador
+                            $plantaDerivada = $e->plantaDerivadaId ?? null;
+                            $plantaNombre = $e->plantaDerivadaNombre ?? 'Sin planta';
+                        @endphp
+                        @if($plantaDerivada)
+                            <span class="badge bg-success">{{ $plantaNombre }}</span>
+                        @else
+                            <span class="badge bg-warning text-dark">Sin planta</span>
+                        @endif
+                    </td>
+
+                    <td>
                         @if($e->ext?->tipo_empleado)
-                            <span class="badge bg-info text-dark">{{ ucfirst($e->ext->tipo_empleado) }}</span>
+                            @php
+                                $tipoClass = match($e->ext->tipo_empleado) {
+                                    'operativo' => 'bg-warning text-dark',
+                                    'administrativo' => 'bg-info text-dark',
+                                    'corporativo' => 'bg-success',
+                                    default => 'bg-secondary'
+                                };
+                            @endphp
+                            <span class="badge {{ $tipoClass }}">{{ ucfirst($e->ext->tipo_empleado) }}</span>
                         @else
                             <span class="badge bg-secondary">No clasificado</span>
                         @endif
@@ -88,7 +110,7 @@
                 </tr>
                 @empty
                 <tr>
-                    <td colspan="7" class="text-center text-muted py-4">No se encontraron empleados.</td>
+                    <td colspan="8" class="text-center text-muted py-4">No se encontraron empleados.</td>
                 </tr>
                 @endforelse
             </tbody>

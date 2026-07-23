@@ -50,6 +50,8 @@
                             <div class="col-md-6"><strong>Puesto:</strong> <span id="empPuesto"></span></div>
                             <div class="col-md-6"><strong>Departamento:</strong> <span id="empDepto"></span></div>
                             <div class="col-md-6"><strong>Turno:</strong> <span id="empTurno"></span></div>
+                            {{-- NUEVO: planta derivada de sitec --}}
+                            <div class="col-md-6 mt-2"><strong>Planta (derivada):</strong> <span id="empPlanta"></span></div>
                         </div>
                     </div>
 
@@ -80,15 +82,16 @@
                             <div class="form-text" id="tipoHint"></div>
                         </div>
 
+                        {{-- NUEVO: Planta read-only (se asigna automáticamente) --}}
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Planta base</label>
-                            <select name="planta_id" id="planta_id" class="form-select" required>
-                                <option value="">Seleccionar...</option>
-                                @foreach($plantas as $p)
-                                    <option value="{{ $p->id }}" @if(old('planta_id')==$p->id) selected @endif>{{ $p->nombre }}</option>
-                                @endforeach
-                            </select>
-                            <div class="form-text">Planta donde tiene su base. Los corporativos tienen acceso a todas las plantas según RN-01.</div>
+                            <input type="text" class="form-control bg-light" readonly
+                                   value="Se asigna automáticamente desde sitec">
+                            <div class="form-text">
+                                <i class="bi bi-info-circle"></i>
+                                La planta se deriva de la clasificación del empleado
+                                en sitec. No es necesario asignarla manualmente.
+                            </div>
                         </div>
 
                         <div class="col-md-6 mb-3">
@@ -198,6 +201,8 @@ document.getElementById('btnBuscar').addEventListener('click', async function() 
         document.getElementById('empPuesto').textContent = data.puesto || '—';
         document.getElementById('empDepto').textContent = data.departamento || '—';
         document.getElementById('empTurno').textContent = data.turno || '—';
+        // NUEVO: mostrar la planta derivada
+        document.getElementById('empPlanta').textContent = data.planta || '—';
         datos.classList.remove('d-none');
 
         // Sugerir tipo_empleado según el puesto clasificado

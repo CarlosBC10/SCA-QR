@@ -6,6 +6,7 @@ use App\Http\Controllers\UsuarioController;
 use App\Http\Controllers\PuestoTipoEmpleadoController;
 use App\Http\Controllers\EmpleadoExtScaController;
 use App\Http\Controllers\ScannerController;
+use App\Http\Controllers\ClasificacionPlantaController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Auth;
 
@@ -76,6 +77,7 @@ Route::middleware('auth')->group(function () {
     // Panel del Guardia (Usa el ScannerController)
     Route::get('/guardia/dashboard', [ScannerController::class, 'panelGuardia'])->middleware('role:Superadmin,Admin,Aprobador,Guardia')->name('guardia.dashboard');
     Route::get('/api/guardia/pending', [ScannerController::class, 'pendientesGuardia'])->name('api.guardia.pending');
+    Route::get('/api/guardia/denegados', [ScannerController::class, 'denegadosGuardia'])->name('api.guardia.denegados');
     Route::post('/api/guardia/resolve', [ScannerController::class, 'resolverPendiente'])->name('api.guardia.resolve');
     Route::post('/guardia/terminar-turno', [ScannerController::class, 'terminarTurno'])->name('guardia.terminar.turno');
 
@@ -105,4 +107,16 @@ Route::middleware('auth')->group(function () {
         Route::put('/empleados/{empleadoId}', [EmpleadoExtScaController::class, 'update'])->name('empleados.update');
         Route::get('/empleados/buscar', [EmpleadoExtScaController::class, 'buscar'])->name('empleados.buscar');
     });
+
+    // NUEVO: Mapeo Clasificaciones → Plantas
+    Route::middleware('role:Superadmin,Admin,Aprobador')->group(function () {
+        Route::get('/clasificaciones', [ClasificacionPlantaController::class, 'index'])->name('clasificaciones.index');
+        Route::put('/clasificaciones/{idClasificacion}', [ClasificacionPlantaController::class, 'update'])->name('clasificaciones.update');
+        Route::delete('/clasificaciones/{idClasificacion}', [ClasificacionPlantaController::class, 'destroy'])->name('clasificaciones.destroy');
+    });
+    // APIs del guardia (NUEVAS)
+    Route::get('/api/guardia/feed', [ScannerController::class, 'feedActividad'])->name('api.guardia.feed');
+    Route::get('/api/guardia/dentro', [ScannerController::class, 'personasDentro'])->name('api.guardia.dentro');
+    Route::post('/api/guardia/marcar-visto', [ScannerController::class, 'marcarDenegadoVisto'])->name('api.guardia.marcar-visto');
+    
 });

@@ -250,6 +250,84 @@
             .main-content { margin-left: 0; }
             .sidebar-toggle { display: block; }
         }
+
+                /* ===== DARK MODE GLOBAL — Bootstrap overrides ===== */
+        [data-bs-theme="dark"] body { background-color: var(--sca-bg); color: var(--sca-text); }
+
+        [data-bs-theme="dark"] .table { --bs-table-bg: transparent; --bs-table-color: var(--sca-text); }
+        [data-bs-theme="dark"] .table-light { --bs-table-bg: rgba(255,255,255,0.05); --bs-table-color: var(--sca-text); background-color: rgba(255,255,255,0.05) !important; }
+        [data-bs-theme="dark"] .table-hover > tbody > tr:hover > * { background-color: rgba(255,255,255,0.04); }
+        [data-bs-theme="dark"] .table td, [data-bs-theme="dark"] .table th { border-color: var(--sca-border); }
+
+        [data-bs-theme="dark"] .bg-light { background-color: rgba(255,255,255,0.05) !important; color: var(--sca-text) !important; }
+        [data-bs-theme="dark"] .text-dark { color: var(--sca-text) !important; }
+        [data-bs-theme="dark"] .text-muted { color: var(--sca-text-muted) !important; }
+        [data-bs-theme="dark"] .form-text { color: var(--sca-text-muted) !important; }
+
+        [data-bs-theme="dark"] .card { background: var(--sca-card-bg); color: var(--sca-text); }
+        [data-bs-theme="dark"] .card-header { background: transparent !important; border-color: var(--sca-border); color: var(--sca-text); }
+        [data-bs-theme="dark"] .card-body { color: var(--sca-text); }
+
+        [data-bs-theme="dark"] .modal-content { background: var(--sca-card-bg); color: var(--sca-text); border-color: var(--sca-border); }
+        [data-bs-theme="dark"] .modal-header { border-color: var(--sca-border); }
+        [data-bs-theme="dark"] .modal-footer { border-color: var(--sca-border); }
+        [data-bs-theme="dark"] .btn-close { filter: invert(1) grayscale(100%) brightness(200%); }
+
+        [data-bs-theme="dark"] .form-control, [data-bs-theme="dark"] .form-select {
+            background: var(--sca-input-bg); color: var(--sca-text) !important; border-color: var(--sca-input-border);
+        }
+        [data-bs-theme="dark"] .form-control::placeholder { color: var(--sca-text-muted); }
+        [data-bs-theme="dark"] .input-group-text { background: rgba(255,255,255,0.05); border-color: var(--sca-input-border); color: var(--sca-text-muted); }
+
+        [data-bs-theme="dark"] .dropdown-menu { background: var(--sca-card-bg); border-color: var(--sca-border); }
+        [data-bs-theme="dark"] .dropdown-item { color: var(--sca-text); }
+        [data-bs-theme="dark"] .dropdown-item:hover { background: var(--sca-hover); }
+
+        [data-bs-theme="dark"] .nav-tabs { border-color: var(--sca-border); }
+        [data-bs-theme="dark"] .nav-tabs .nav-link { color: var(--sca-text-muted); }
+        [data-bs-theme="dark"] .nav-tabs .nav-link.active { color: var(--sca-primary); border-bottom-color: var(--sca-primary); }
+
+        [data-bs-theme="dark"] .alert-info { background: rgba(23,162,184,0.15); color: #5dcfe8; border-color: rgba(23,162,184,0.3); }
+        [data-bs-theme="dark"] .alert-success { background: rgba(40,167,69,0.15); color: #6dd07f; border-color: rgba(40,167,69,0.3); }
+        [data-bs-theme="dark"] .alert-warning { background: rgba(255,193,7,0.15); color: #ffdb6d; border-color: rgba(255,193,7,0.3); }
+        [data-bs-theme="dark"] .alert-danger { background: rgba(220,53,69,0.15); color: #f08490; border-color: rgba(220,53,69,0.3); }
+
+        [data-bs-theme="dark"] .badge.bg-light { background: rgba(255,255,255,0.1) !important; color: var(--sca-text) !important; }
+        [data-bs-theme="dark"] .badge.bg-secondary { background: rgba(255,255,255,0.15) !important; color: var(--sca-text) !important; }
+        [data-bs-theme="dark"] .badge.bg-warning { background: #f57c00 !important; color: #fff !important; }
+        [data-bs-theme="dark"] .badge.bg-info { background: #17a2b8 !important; color: #fff !important; }
+
+        [data-bs-theme="dark"] .progress { background: rgba(255,255,255,0.08); }
+        [data-bs-theme="dark"] .list-group-item { background: var(--sca-card-bg); color: var(--sca-text); border-color: var(--sca-border); }
+        [data-bs-theme="dark"] .list-group-item-action:hover { background: var(--sca-hover); }
+
+        [data-bs-theme="dark"] .btn-outline-secondary { color: var(--sca-text-muted); border-color: var(--sca-border); }
+        [data-bs-theme="dark"] .btn-outline-secondary:hover { background: var(--sca-hover); color: var(--sca-text); }
+        [data-bs-theme="dark"] .btn-outline-primary { color: var(--sca-primary); border-color: var(--sca-primary); }
+        [data-bs-theme="dark"] .btn-outline-danger { color: #f08490; border-color: rgba(220,53,69,0.5); }
+        [data-bs-theme="dark"] .btn-outline-danger:hover { background: #dc3545; color: #fff; }
+        [data-bs-theme="dark"] .btn-outline-warning { color: #ffdb6d; border-color: rgba(255,193,7,0.5); }
+        [data-bs-theme="dark"] .btn-outline-info { color: #5dcfe8; border-color: rgba(23,162,184,0.5); }
+        [data-bs-theme="dark"] .btn-outline-success { color: #6dd07f; border-color: rgba(40,167,69,0.5); }
+
+        [data-bs-theme="dark"] .sca-alert-warning { background: rgba(255,193,7,0.12); color: #ffdb6d; border: 1px solid rgba(255,193,7,0.2); }
+        [data-bs-theme="dark"] .sca-card { background: var(--sca-card-bg); }
+        [data-bs-theme="dark"] .sca-modal-content { background: var(--sca-card-bg); color: var(--sca-text); }
+
+        [data-bs-theme="dark"] .form-check-input { background-color: var(--sca-input-bg); border-color: var(--sca-input-border); }
+        [data-bs-theme="dark"] .form-check-input:checked { background-color: var(--sca-primary); border-color: var(--sca-primary); }
+
+        [data-bs-theme="dark"] .page-link { background: var(--sca-card-bg); border-color: var(--sca-border); color: var(--sca-primary); }
+        [data-bs-theme="dark"] .page-item.disabled .page-link { background: var(--sca-card-bg); border-color: var(--sca-border); color: var(--sca-text-muted); }
+        [data-bs-theme="dark"] .page-item.active .page-link { background: var(--sca-primary); border-color: var(--sca-primary); color: #fff; }
+
+        [data-bs-theme="dark"] hr { border-color: var(--sca-border); opacity: 0.5; }
+        [data-bs-theme="dark"] .border { border-color: var(--sca-border) !important; }
+        [data-bs-theme="dark"] .border-top { border-top-color: var(--sca-border) !important; }
+        [data-bs-theme="dark"] .border-bottom { border-bottom-color: var(--sca-border) !important; }
+        [data-bs-theme="dark"] .border-start { border-left-color: var(--sca-border) !important; }
+        [data-bs-theme="dark"] .border-end { border-right-color: var(--sca-border) !important; }
+
     </style>
     
     @stack('styles')
@@ -262,7 +340,7 @@
         <div class="sidebar-header">
             {{-- LOGO: si existe el archivo /logo.png lo usa, si no, muestra el fallback --}}
             @if(file_exists(public_path('logo.png')))
-                <img src="{{ asset('logo.png') }}" alt="Fruitex" class="sidebar-logo-img">
+                <img src="{{ asset('logo-fruitex.png') }}" alt="Fruitex" class="sidebar-logo-img">
             @elseif(file_exists(public_path('logo.svg')))
                 <img src="{{ asset('logo.svg') }}" alt="Fruitex" class="sidebar-logo-img">
             @else
@@ -291,6 +369,9 @@
             <a href="{{ route('puestos.index') }}" class="nav-link">
                 <i class="bi bi-list-task"></i> Clasificar Puestos
             </a>
+            <a href="{{ route('clasificaciones.index') }}" class="nav-link">
+                <i class="bi bi-diagram-3"></i> Clasificaciones → Plantas
+            </a>
             @endif
             
             @if(Auth::user()->isSuperadmin())
@@ -312,6 +393,9 @@
             <button class="sidebar-toggle" id="sidebarToggle"><i class="bi bi-list"></i></button>
             
             <div class="d-flex align-items-center gap-3 ms-auto">
+                <div class="d-flex align-items-center gap-3 ms-auto">
+                {{-- NUEVO: Reloj en tiempo real --}}
+                @include('partials._reloj', ['id' => 'topbar'])
                 {{-- BOTÓN MODO OSCURO --}}
                 <button class="theme-toggle" id="themeToggle" title="Cambiar tema">
                     <i class="bi bi-sun"></i>
@@ -329,13 +413,15 @@
                         @endif
                     </div>
                 </div>
-                
+                {{-- NUEVO: los guardias NO ven este botón (usan Terminar Turno en su dashboard) --}}
+                @if(!Auth::user()->isGuardia())
                 <form method="POST" action="{{ route('logout') }}">
                     @csrf
                     <button type="submit" class="btn btn-sm btn-outline-danger" title="Cerrar sesión">
                         <i class="bi bi-box-arrow-right"></i>
                     </button>
                 </form>
+                @endif
             </div>
         </header>
 
