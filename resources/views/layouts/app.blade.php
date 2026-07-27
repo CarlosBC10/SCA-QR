@@ -357,6 +357,11 @@
             <a href="{{ url('/') }}" class="nav-link">
                 <i class="bi bi-grid"></i> Dashboard
             </a>
+
+            {{-- NUEVO: Solicitudes visible para TODOS los roles --}}
+            <a href="{{ route('solicitudes.hub') }}" class="nav-link">
+                <i class="bi bi-file-earmark-text"></i> Solicitudes
+            </a>
             
             @if(Auth::user()->isSuperadmin() || Auth::user()->isAdmin() || Auth::user()->isAprobador())
             <div class="nav-section-title">Gestión</div>

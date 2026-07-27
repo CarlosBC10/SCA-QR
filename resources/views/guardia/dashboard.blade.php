@@ -114,6 +114,15 @@
                     </div>
                 </div>
                 <div class="card-body p-0">
+                    {{-- Header de columnas --}}
+                    <div class="d-flex align-items-center px-3 py-2 border-bottom" 
+                         style="background: var(--sca-hover); font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--sca-text-muted);">
+                        <div style="width: 70px;" class="text-center">Hora</div>
+                        <div style="width: 50px;" class="text-center">Tipo</div>
+                        <div class="flex-grow-1 px-3">Persona</div>
+                        <div style="min-width: 110px;" class="text-end">Acción</div>
+                    </div>
+                    {{-- Lista --}}
                     <div id="feed-list" style="max-height: 450px; overflow-y: auto;">
                         <div class="text-center text-muted py-5">
                             <span class="spinner-border spinner-border-sm"></span> Cargando...
@@ -502,17 +511,13 @@
 
     function renderFeed() {
         const container = document.getElementById('feed-list');
-        if (!container) {
-            console.warn('Elemento #feed-list no encontrado');
-            return;
-        }
+        if (!container) return;
 
         if (feedData.length === 0) {
             container.innerHTML = '<div class="text-center text-muted py-5"><i class="bi bi-activity fs-1 text-muted opacity-50"></i><p class="mt-2 mb-0">Sin actividad hoy</p></div>';
             return;
         }
 
-        // Filtrar según el botón activo
         let datos = feedData;
         if (feedFilter !== 'todos') {
             if (feedFilter === 'denegado') {
@@ -532,8 +537,8 @@
             let accion = matchAccion(e.estado, e.evento);
             
             let tipoBadge = e.tipo_persona === 'Emp' 
-                ? '<span class="badge bg-success-subtle text-success border border-success-subtle ms-1">Emp</span>' 
-                : '<span class="badge bg-info-subtle text-info border border-info-subtle ms-1">Vis</span>';
+                ? '<span class="badge bg-success-subtle text-success border border-success-subtle">Emp</span>' 
+                : '<span class="badge bg-info-subtle text-info border border-info-subtle">Vis</span>';
 
             let detalle = '';
             if (e.estado === 'denegado' && e.motivo) {
@@ -541,25 +546,32 @@
             }
 
             let origenBadge = e.origen === 'manual' 
-                ? '<span class="badge bg-secondary ms-1">Manual</span>' 
+                ? '<span class="badge bg-secondary">Manual</span>' 
                 : '';
 
             html += `
-                <div class="d-flex align-items-center px-3 py-2" style="border-bottom: 1px solid var(--sca-border);">
-                    <div class="me-3">
-                        <i class="bi ${e.icono} text-${e.color} fs-4"></i>
+                <div class="d-flex align-items-center px-3 py-3 border-bottom" style="transition: background 0.2s;" 
+                     onmouseover="this.style.background='var(--sca-hover)'" 
+                     onmouseout="this.style.background='transparent'">
+                    <div style="width: 70px;" class="text-center">
+                        <div class="font-monospace fw-bold small">${e.hora}</div>
                     </div>
-                    <div class="flex-grow-1">
-                        <div class="d-flex align-items-center flex-wrap gap-1">
+                    <div style="width: 50px;" class="text-center">
+                        <div class="d-inline-flex align-items-center justify-content-center rounded-circle" 
+                             style="width: 36px; height: 36px; background: var(--sca-hover);">
+                            <i class="bi ${e.icono} text-${e.color}"></i>
+                        </div>
+                    </div>
+                    <div class="flex-grow-1 px-3">
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
                             <strong>${e.nombre}</strong>
-                            <span class="badge bg-${e.color}">${accion}</span>
                             ${tipoBadge}
                             ${origenBadge}
                         </div>
                         ${detalle}
                     </div>
-                    <div class="text-end ms-2">
-                        <small class="text-muted font-monospace">${e.hora}</small>
+                    <div style="min-width: 110px;" class="text-end">
+                        <span class="badge bg-${e.color}">${accion}</span>
                     </div>
                 </div>
             `;

@@ -554,18 +554,36 @@ class ScannerController extends Controller
 
     /**
      * Personas actualmente dentro de la planta.
-     * Funciona para Guardia (su planta) y para Admin/Aprobador/Superadmin (planta seleccionada o propia).
+     * - Guardia: siempre su planta
+     * - Aprobador: solo su planta
+     * - Admin/Superadmin: puede elegir planta con ?planta_id=X
      */
     public function personasDentro()
     {
         $user = Auth::user();
         
-        // Si es guardia, usa su planta. Si es admin/aprobador, usa su planta_id.
-        $plantaId = $user->guardia?->planta_id ?? $user->planta_id;
+        // Determinar planta a consultar
+        $plantaId = request()->query('planta_id');
+
+        if ($user->isGuardia()) {
+            // Guardia: siempre su planta
+            $plantaId = $user->guardia?->planta_id;
+        } elseif ($user->isAprobador()) {
+            // Aprobador: solo su planta (no puede ver otras)
+            $plantaId = $user->planta_id;
+        } elseif ($user->isAdmin() || $user->isSuperadmin()) {
+            // Admin/Superadmin: puede elegir, default a su planta o primera planta
+            if (!$plantaId) {
+                $plantaId = $user->planta_id 
+                    ?? \App\Models\Planta::where('activa', true)->value('id');
+            }
+        }
 
         if (!$plantaId) {
-            return response()->json(['total' => 0, 'personas' => [], 'empleados' => 0, 'visitantes' => 0]);
+            return response()->json(['total' => 0, 'personas' => [], 'empleados' => 0, 'visitantes' => 0, 'planta_nombre' => 'Sin planta']);
         }
+
+        $planta = \App\Models\Planta::find($plantaId);
 
         $eventos = Bitacora::where('planta_id', $plantaId)
             ->whereDate('fecha_hora', today())
@@ -577,7 +595,10 @@ class ScannerController extends Controller
         $dentro = $eventos->filter(fn($b) => $b->tipo_evento === 'entrada')->values();
 
         if ($dentro->isEmpty()) {
-            return response()->json(['total' => 0, 'personas' => [], 'empleados' => 0, 'visitantes' => 0]);
+            return response()->json([
+                'total' => 0, 'personas' => [], 'empleados' => 0, 'visitantes' => 0,
+                'planta_nombre' => $planta?->nombre ?? 'N/A'
+            ]);
         }
 
         $idsEmpleados = $dentro->where('persona_tipo', 'empleado')->pluck('persona_id')->unique()->toArray();
@@ -613,6 +634,8 @@ class ScannerController extends Controller
             'empleados' => $lista->where('tipo', 'empleado')->count(),
             'visitantes' => $lista->where('tipo', 'visitante')->count(),
             'personas' => $lista->sortBy('hora_entrada')->values(),
+            'planta_nombre' => $planta?->nombre ?? 'N/A',
+            'planta_id' => $plantaId,
         ]);
     }
 

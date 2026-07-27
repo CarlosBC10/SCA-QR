@@ -89,7 +89,7 @@
 {{-- NUEVA FILA: Personas dentro + Alertas --}}
 <div class="row g-4 mb-4">
     <div class="col-lg-8 animate-fade-in-up" style="animation-delay: 0.5s;">
-        @include('partials._personas_dentro', ['id' => 'superadmin'])
+        @include('partials._personas_dentro', ['id' => 'superadmin', 'plantas' => \App\Models\Planta::where('activa', true)->orderBy('nombre')->get()])
     </div>
     <div class="col-lg-4 animate-fade-in-up" style="animation-delay: 0.6s;">
         <div class="card border-0 h-100" style="border-radius: 16px; background: linear-gradient(135deg, #2e7d32, #1b5e20);">

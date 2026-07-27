@@ -42,6 +42,13 @@
     .kiosko-wrapper::before { width: 420px; height: 420px; top: -140px; right: -120px; background: rgba(255,255,255,0.10); }
     .kiosko-wrapper::after { width: 480px; height: 480px; bottom: -180px; left: -140px; background: rgba(0,0,0,0.28); }
 
+    /* Marca de fruta (SVG propio) — sutil, solo visible en la pantalla de espera/inactividad */
+    .kiosko-fruit-art { position: absolute; z-index: 0; pointer-events: none; }
+    .kiosko-fruit-art svg { width: 100%; height: 100%; display: block; }
+    .kiosko-mango-br { bottom: -54px; right: -64px; width: 260px; height: 295px; opacity: 0.30; }
+    .kiosko-pina-bl { bottom: -42px; left: -38px; width: 184px; height: 239px; opacity: 0.26; transform: rotate(-8deg); }
+    @media (max-width: 480px) { .kiosko-fruit-art { display: none; } }
+
     .kiosko-screen {
         display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center;
         width: 100%; height: 100%; padding: 1rem; position: relative; z-index: 1;
@@ -81,6 +88,40 @@
     }
     .kiosko-icon { font-size: clamp(2.4rem, 7vw, 4rem); line-height: 1; filter: drop-shadow(0 4px 10px rgba(0,0,0,0.25)); }
     .icon-badge .kiosko-icon { margin: 0; }
+
+    /* ===== Marco escáner (pantalla de bienvenida) ===== */
+    .scan-frame {
+        position: relative; width: clamp(140px, 24vw, 200px); height: clamp(140px, 24vw, 200px);
+        display: flex; align-items: center; justify-content: center; margin-bottom: 1.2rem;
+        background: radial-gradient(circle at 40% 35%, rgba(255,255,255,0.14), rgba(255,255,255,0.04) 70%);
+        border-radius: 30px; overflow: hidden; box-shadow: 0 20px 44px rgba(0,0,0,0.3);
+    }
+    .scan-frame .scan-corner {
+        position: absolute; width: 32px; height: 32px; border: 4px solid rgba(255,255,255,0.9);
+    }
+    .scan-frame .scan-corner.tl { top: 8px; left: 8px; border-right: none; border-bottom: none; border-radius: 10px 0 0 0; }
+    .scan-frame .scan-corner.tr { top: 8px; right: 8px; border-left: none; border-bottom: none; border-radius: 0 10px 0 0; }
+    .scan-frame .scan-corner.bl { bottom: 8px; left: 8px; border-right: none; border-top: none; border-radius: 0 0 0 10px; }
+    .scan-frame .scan-corner.br { bottom: 8px; right: 8px; border-left: none; border-top: none; border-radius: 0 0 10px 0; }
+    .scan-frame .kiosko-icon { color: rgba(255,255,255,0.9); }
+    .scan-frame .scan-line {
+        position: absolute; left: 10px; right: 10px; height: 3px; border-radius: 3px;
+        background: linear-gradient(90deg, transparent, #ffffff, transparent);
+        box-shadow: 0 0 14px 2px rgba(255,255,255,0.55);
+        animation: scanFrameLine 2.6s ease-in-out infinite;
+    }
+    @keyframes scanFrameLine {
+        0% { top: 16%; opacity: 0; }
+        12% { opacity: 1; }
+        50% { top: 80%; opacity: 1; }
+        62% { opacity: 0; }
+        100% { top: 16%; opacity: 0; }
+    }
+
+    .kiosko-brand-logo {
+        height: 38px; padding: 6px 12px; background: #fff; border-radius: 10px;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.25); margin-bottom: 0.7rem;
+    }
 
     .kiosko-eyebrow {
         font-size: clamp(0.65rem, 1.4vw, 0.8rem); font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
@@ -145,9 +186,13 @@
     .modo-dot.mixto { background: #4fc3f7; box-shadow: 0 0 8px #4fc3f7; }
 
     .mode-badge {
-        display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1.3rem; border-radius: 50px;
-        font-size: clamp(0.8rem, 1.8vw, 1rem); font-weight: 700; margin-bottom: 1.2rem;
+        display: inline-flex; align-items: center; gap: 0.55rem; padding: 0.45rem 1.3rem 0.45rem 0.5rem; border-radius: 50px;
+        font-size: clamp(0.8rem, 1.8vw, 1rem); font-weight: 700; margin-bottom: 1.3rem;
         background: var(--k-glass); color: #fff; border: 1px solid var(--k-glass-border);
+    }
+    .mode-badge i {
+        display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+        border-radius: 50%; background: rgba(255,255,255,0.2); font-size: 0.85em; flex-shrink: 0;
     }
 
     .camera-floating {
@@ -213,6 +258,7 @@
         .mode-badge { margin-bottom: 0.5rem; padding: 0.3rem 0.9rem; }
         .camera-floating { width: 150px; }
         .camera-floating video { height: 100px; }
+        .kiosko-fruit-art { display: none; }
     }
 
     #screen-loading .kiosko-subtitle { animation: pulse 1.5s ease-in-out infinite; margin-top: 1.2rem; }
@@ -225,6 +271,81 @@
 </style>
 
 <div class="kiosko-wrapper">
+
+    {{-- Ilustración de fruta (SVG propio, mismo lenguaje visual que el login) --}}
+    <svg width="0" height="0" style="position:absolute;">
+        <defs>
+            <symbol id="k-mango-branch" viewBox="0 0 300 340">
+                <linearGradient id="kLeafA" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#6fae4a"/>
+                    <stop offset="100%" stop-color="#356b2c"/>
+                </linearGradient>
+                <linearGradient id="kLeafB" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#8bc34a"/>
+                    <stop offset="100%" stop-color="#4a7d2e"/>
+                </linearGradient>
+                <linearGradient id="kMangoA" x1="0" y1="0" x2="0.3" y2="1">
+                    <stop offset="0%" stop-color="#e2572c"/>
+                    <stop offset="45%" stop-color="#f2a53c"/>
+                    <stop offset="100%" stop-color="#e8d24a"/>
+                </linearGradient>
+                <linearGradient id="kMangoB" x1="0" y1="0" x2="0.3" y2="1">
+                    <stop offset="0%" stop-color="#f2a53c"/>
+                    <stop offset="55%" stop-color="#f5c93f"/>
+                    <stop offset="100%" stop-color="#c7d445"/>
+                </linearGradient>
+                <g transform="translate(0,60)">
+                    <path d="M150,0 C146,26 140,44 150,64 C160,84 168,96 158,118" fill="none" stroke="#5b3a22" stroke-width="5" stroke-linecap="round"/>
+                    <g stroke="#2f5c26" stroke-width="1" stroke-opacity="0.5">
+                        <path d="M150,10 C170,-30 210,-46 238,-40 C220,-8 190,14 152,22 Z" fill="url(#kLeafA)" transform="rotate(6 150 10)"/>
+                        <path d="M150,14 C130,-28 92,-46 62,-38 C82,-4 114,16 150,22 Z" fill="url(#kLeafB)" transform="rotate(-4 150 14)"/>
+                        <path d="M156,30 C182,4 220,-2 244,14 C222,42 190,54 156,46 Z" fill="url(#kLeafA)" transform="rotate(10 156 30)"/>
+                        <path d="M150,34 C120,10 82,8 56,26 C80,52 116,60 150,46 Z" fill="url(#kLeafB)" transform="rotate(-8 150 34)"/>
+                        <path d="M158,54 C186,40 218,44 236,66 C210,86 178,86 156,70 Z" fill="url(#kLeafA)" transform="rotate(4 158 54)"/>
+                    </g>
+                    <g transform="translate(196,150) rotate(10)">
+                        <path d="M0,-58 C24,-56 36,-24 34,10 C32,48 12,74 -3,75 C-18,74 -36,48 -36,12 C-36,-22 -22,-56 0,-58 Z" fill="url(#kMangoB)"/>
+                        <ellipse cx="-10" cy="-14" rx="10" ry="20" fill="#ffffff" opacity="0.22" transform="rotate(-16 -10 -14)"/>
+                    </g>
+                    <g transform="translate(140,168) rotate(-6)">
+                        <path d="M0,-72 C30,-70 46,-30 44,12 C42,58 16,90 -3,92 C-22,90 -44,58 -44,14 C-46,-28 -28,-70 0,-72 Z" fill="url(#kMangoA)"/>
+                        <ellipse cx="-14" cy="-20" rx="13" ry="26" fill="#ffffff" opacity="0.26" transform="rotate(-16 -14 -20)"/>
+                        <path d="M22,20 C36,42 32,68 6,86 C22,62 26,36 22,20 Z" fill="#8a2c14" opacity="0.16"/>
+                    </g>
+                </g>
+            </symbol>
+
+            <symbol id="k-pineapple-fruit" viewBox="0 0 200 260">
+                <linearGradient id="kPineLeaf" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#7cb342"/>
+                    <stop offset="100%" stop-color="#33691e"/>
+                </linearGradient>
+                <linearGradient id="kPineBody" x1="0" y1="0" x2="0.25" y2="1">
+                    <stop offset="0%" stop-color="#f6d365"/>
+                    <stop offset="55%" stop-color="#e8b33d"/>
+                    <stop offset="100%" stop-color="#a9701f"/>
+                </linearGradient>
+                <clipPath id="kPineClip">
+                    <path d="M58,78 C55,60 145,60 142,78 C158,110 160,160 150,200 C148,215 150,230 140,240 C120,252 80,252 60,240 C50,230 52,215 50,200 C40,160 42,110 58,78 Z"/>
+                </clipPath>
+                <g transform="translate(100,72)">
+                    <path d="M-6,0 C-11,-42 -5,-84 0,-112 C5,-84 11,-42 6,0 Z" fill="url(#kPineLeaf)" transform="rotate(-32)"/>
+                    <path d="M-6,0 C-11,-46 -5,-92 0,-124 C5,-92 11,-46 6,0 Z" fill="url(#kPineLeaf)" transform="rotate(-14)"/>
+                    <path d="M-6,0 C-11,-50 -5,-98 0,-132 C5,-98 11,-50 6,0 Z" fill="url(#kPineLeaf)" transform="rotate(4)"/>
+                    <path d="M-6,0 C-11,-46 -5,-92 0,-124 C5,-92 11,-46 6,0 Z" fill="url(#kPineLeaf)" transform="rotate(20)"/>
+                    <path d="M-6,0 C-11,-42 -5,-84 0,-112 C5,-84 11,-42 6,0 Z" fill="url(#kPineLeaf)" transform="rotate(36)"/>
+                </g>
+                <path d="M58,78 C55,60 145,60 142,78 C158,110 160,160 150,200 C148,215 150,230 140,240 C120,252 80,252 60,240 C50,230 52,215 50,200 C40,160 42,110 58,78 Z" fill="url(#kPineBody)"/>
+                <g clip-path="url(#kPineClip)" stroke="#8a5a14" stroke-width="2.5" stroke-opacity="0.45" fill="none">
+                    <path d="M20,90 L100,180 M40,80 L130,200 M60,74 L155,210 M85,72 L172,215 M105,74 L185,205"/>
+                    <path d="M180,90 L100,180 M160,80 L70,200 M140,74 L45,210 M115,72 L28,215 M95,74 L15,205"/>
+                </g>
+            </symbol>
+        </defs>
+    </svg>
+
+    <div class="kiosko-fruit-art kiosko-mango-br"><svg><use href="#k-mango-branch"/></svg></div>
+    <div class="kiosko-fruit-art kiosko-pina-bl"><svg><use href="#k-pineapple-fruit"/></svg></div>
 
     <button class="btn-exit" onclick="showExitModal()">
         <i class="bi bi-x-circle"></i> Salir
@@ -249,9 +370,18 @@
 
     {{-- BIENVENIDA --}}
     <div id="screen-welcome" class="kiosko-screen active">
-        <div class="icon-badge">
-            <i class="bi bi-qr-code-scan kiosko-icon" style="color:#fff;"></i>
+        <div class="scan-frame">
+            <span class="scan-corner tl"></span>
+            <span class="scan-corner tr"></span>
+            <span class="scan-corner bl"></span>
+            <span class="scan-corner br"></span>
+            <i class="bi bi-qr-code-scan kiosko-icon"></i>
+            <div class="scan-line"></div>
         </div>
+
+        @if(file_exists(public_path('logo-fruitex.png')))
+            <img src="{{ asset('logo-fruitex.png') }}" alt="Fruitex de México" class="kiosko-brand-logo">
+        @endif
         <div class="kiosko-eyebrow" style="color:#fff;">Fruitex de México</div>
         <h1 class="kiosko-title" style="color:#fff;">SCA-QR</h1>
         <p class="kiosko-subtitle" style="color:#fff; margin-bottom: 0.5rem;">Acerque su credencial al escáner</p>

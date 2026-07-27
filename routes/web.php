@@ -9,6 +9,7 @@ use App\Http\Controllers\ScannerController;
 use App\Http\Controllers\ClasificacionPlantaController;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Auth;
+use App\Http\Controllers\SolicitudController;
 
 // Ruta raíz: redirige a login o al dashboard
 Route::get('/', function () {
@@ -118,5 +119,20 @@ Route::middleware('auth')->group(function () {
     Route::get('/api/guardia/feed', [ScannerController::class, 'feedActividad'])->name('api.guardia.feed');
     Route::get('/api/guardia/dentro', [ScannerController::class, 'personasDentro'])->name('api.guardia.dentro');
     Route::post('/api/guardia/marcar-visto', [ScannerController::class, 'marcarDenegadoVisto'])->name('api.guardia.marcar-visto');
+
+    // M4: Solicitudes
+    Route::get('/solicitudes', [SolicitudController::class, 'hub'])->name('solicitudes.hub');
+    Route::get('/solicitudes/historial', [SolicitudController::class, 'historial'])->name('solicitudes.historial');
+    Route::get('/solicitudes/bandeja', [SolicitudController::class, 'bandeja'])->name('solicitudes.bandeja');
+    Route::get('/solicitudes/create', [SolicitudController::class, 'create'])->name('solicitudes.create');
+    Route::post('/solicitudes', [SolicitudController::class, 'store'])->name('solicitudes.store');
     
+    // IMPORTANTE: Esta ruta debe ir ANTES de la ruta con el parámetro {solicitud}
+    Route::get('/solicitudes/buscar-empleado', [SolicitudController::class, 'buscarEmpleado'])->name('solicitudes.buscar-empleado');
+    
+    // Rutas con parámetros dinámicos al final
+    Route::get('/solicitudes/{solicitud}', [SolicitudController::class, 'show'])->name('solicitudes.show');
+    Route::post('/solicitudes/{solicitud}/cancel', [SolicitudController::class, 'cancel'])->name('solicitudes.cancel');
+
+
 });
