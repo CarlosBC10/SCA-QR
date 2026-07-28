@@ -351,16 +351,24 @@
                 </div>
             @endif
         </div>
-        
+
         <nav class="sidebar-nav">
             <div class="nav-section-title">Principal</div>
             <a href="{{ url('/') }}" class="nav-link">
                 <i class="bi bi-grid"></i> Dashboard
             </a>
-
-            {{-- NUEVO: Solicitudes visible para TODOS los roles --}}
-            <a href="{{ route('solicitudes.hub') }}" class="nav-link">
-                <i class="bi bi-file-earmark-text"></i> Solicitudes
+            
+            {{-- SOLICITUDES (Directo en el menú) --}}
+            @if(Auth::user()->isAprobador() || Auth::user()->isAdmin() || Auth::user()->isSuperadmin())
+                <a href="{{ route('solicitudes.bandeja') }}" class="nav-link">
+                    <i class="bi bi-inbox"></i> Bandeja Aprobaciones
+                </a>
+            @endif
+            <a href="{{ route('solicitudes.historial') }}" class="nav-link">
+                <i class="bi bi-clock-history"></i> @if(Auth::user()->isEmpleado()) Mis Solicitudes @else Historial Solicitudes @endif
+            </a>
+            <a href="{{ route('solicitudes.create') }}" class="nav-link">
+                <i class="bi bi-plus-circle"></i> Nueva Solicitud
             </a>
             
             @if(Auth::user()->isSuperadmin() || Auth::user()->isAdmin() || Auth::user()->isAprobador())
@@ -368,6 +376,7 @@
             <a href="{{ route('usuarios.index') }}" class="nav-link">
                 <i class="bi bi-people"></i> Usuarios
             </a>
+
             <a href="{{ route('empleados.index') }}" class="nav-link">
                 <i class="bi bi-person-badge"></i> Empleados
             </a>
@@ -498,5 +507,36 @@
         });
     </script>
     @stack('scripts')
+
+    <script>
+        // ===== HANDLER GLOBAL DE ERRORES AJAX =====
+        window.addEventListener('unhandledrejection', function(event) {
+            console.error('Error de red no capturado:', event.reason);
+            
+            // Evitar mostrar errores de fetch abortados
+            if (event.reason && event.reason.name === 'AbortError') return;
+            
+            // Mostrar toast de error
+            mostrarErrorConexion();
+        });
+
+        function mostrarErrorConexion() {
+            let toast = document.getElementById('toast-error-global');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'toast-error-global';
+                toast.style.cssText = 'position:fixed; top:20px; right:20px; z-index:99999; background:#dc3545; color:#fff; padding:12px 20px; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.3); display:flex; align-items:center; gap:10px;';
+                toast.innerHTML = '<i class="bi bi-wifi-off"></i> <span>Error de conexión con el servidor</span>';
+                document.body.appendChild(toast);
+                
+                setTimeout(() => {
+                    toast.style.opacity = '0';
+                    toast.style.transition = 'opacity 0.3s';
+                    setTimeout(() => toast.remove(), 300);
+                }, 4000);
+            }
+        }
+    </script>
+
 </body>
 </html>

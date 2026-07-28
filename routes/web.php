@@ -40,7 +40,10 @@ Route::middleware('guest')->group(function () {
     Route::get('/register/initial', [LoginController::class, 'showInitialRegistration'])->name('register.initial');
     Route::post('/register/initial', [LoginController::class, 'initialRegistration']);
     
-    // Activar kiosko con PIN (Público)
+    // NUEVO: Página de activación de kiosko separada
+    Route::get('/kiosko/activar', [ScannerController::class, 'mostrarActivarKiosko'])->name('kiosko.activar.form');
+    
+    // Activar kiosko con PIN (POST)
     Route::post('/kiosko/activar', [ScannerController::class, 'activarKiosko'])->name('kiosko.activar');
 });
 

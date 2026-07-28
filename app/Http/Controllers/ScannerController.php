@@ -19,6 +19,18 @@ use Illuminate\Support\Facades\Auth;
 
 class ScannerController extends Controller
 {
+
+    /**
+     * Muestra la página de activación del kiosko (separada del login).
+    */
+    public function mostrarActivarKiosko()
+    {
+        // Si ya hay una sesión de admin/guardia abierta en esta pestaña, 
+        // podría mostrar un warning, pero lo dejamos público.
+        $plantas = Planta::where('activa', true)->orderBy('nombre')->get();
+        return view('kiosko.activar', compact('plantas'));
+    }
+
     public function kiosko(TurnoGuardia $turno)
     {
         if ($turno->fecha_hora_fin) {

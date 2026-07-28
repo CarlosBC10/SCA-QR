@@ -12,7 +12,7 @@
 <div class="row g-4">
 
     {{-- TARJETA: BANDEJA DE APROBACIONES (Solo Aprobador, Admin, Superadmin) --}}
-    @if($user->isAprobador() || $user->isAdmin() || $user->isSuperadmin())
+    @if(Auth::user()->isAprobador() || Auth::user()->isAdmin() || Auth::user()->isSuperadmin())
     <div class="col-md-4">
         <a href="{{ route('solicitudes.bandeja') }}" class="text-decoration-none">
             <div class="card border-0 shadow-sm h-100 sca-card card-hover" style="border-radius: 16px; border-top: 4px solid #f57c00 !important;">
@@ -47,7 +47,7 @@
                     </div>
                     <h5 class="fw-bold mb-1">Nueva Solicitud</h5>
                     <p class="text-muted small mb-2">
-                        @if($user->isEmpleado())
+                        @if(Auth::user()->isEmpleado())
                             Pase de salida o interplantas
                         @else
                             Crear cualquier tipo de solicitud
@@ -68,9 +68,9 @@
                         <i class="bi bi-clock-history fs-2" style="color: #17a2b8;"></i>
                     </div>
                     <h5 class="fw-bold mb-1">
-                        @if($user->isEmpleado())
+                        @if(Auth::user()->isEmpleado())
                             Mis Solicitudes
-                        @elseif($user->isAprobador())
+                        @elseif(Auth::user()->isAprobador())
                             Solicitudes de mi Planta
                         @else
                             Todas las Solicitudes

@@ -107,8 +107,13 @@
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">Teléfono</label>
-                        <input type="text" name="persona_telefono" class="form-control" value="{{ old('persona_telefono') }}">
+                        <div class="input-group">
+                            <span class="input-group-text">+52</span>
+                            <input type="tel" name="persona_telefono" class="form-control" maxlength="10" pattern="\d{10}" title="Solo 10 dígitos numéricos" placeholder="1234567890" value="{{ old('persona_telefono') }}" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+                        </div>
+                        <small class="text-muted">10 dígitos. Si es extranjero, ignora el +52 y pon el número completo.</small>
                     </div>
+
                     <div class="col-md-6" id="campo-empresa" style="display:none;">
                         <label class="form-label">Empresa <span class="text-danger">*</span></label>
                         <input type="text" name="persona_empresa" class="form-control" value="{{ old('persona_empresa') }}">

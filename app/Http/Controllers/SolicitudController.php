@@ -61,7 +61,7 @@ class SolicitudController extends Controller
         $solicitudes = $query->orderBy('created_at', 'desc')->paginate(15);
         $plantas = Planta::where('activa', true)->orderBy('nombre')->get();
 
-        return view('solicitudes.hub', compact('solicitudes', 'plantas'));
+        return view('solicitudes.index', compact('solicitudes', 'plantas'));
     }
 
     /**

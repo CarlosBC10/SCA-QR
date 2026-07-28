@@ -345,12 +345,7 @@
                 <button type="submit" class="login-submit-btn">
                     <i class="bi bi-box-arrow-in-right"></i> Ingresar al sistema
                 </button>
-
-                <div class="login-divider">o</div>
-
-                <button type="button" class="login-kiosko-btn" data-bs-toggle="modal" data-bs-target="#kioskoModal">
-                    <i class="bi bi-tablet"></i> Activar Modo Kiosko
-                </button>
+                
             </form>
 
             <p class="login-form-footer">&copy; {{ date('Y') }} SCA-QR &middot; Fruitex de México</p>
