@@ -1,4 +1,14 @@
 {{-- resources/views/auth/login.blade.php --}}
+{{--
+    CAMBIOS V4 (solo lógica, el diseño visual se conserva 100%):
+      - Eliminado el MODAL MODO KIOSKO con PIN (ya no se usa; el kiosko se
+        activa desde /kiosko/activar con login de guardia).
+      - Eliminado el JS que abría el modal si había kiosko_error en sesión.
+      - Agregado un enlace "Activar Kiosko" que redirige a /kiosko/activar,
+        usando la clase .login-kiosko-btn que YA EXISTÍA en tu CSS.
+      - Todo el CSS, los SVGs (mango, manzana, piña) y la estructura visual
+        se conservan exactamente igual.
+--}}
 @extends('layouts.app')
 
 @section('title', 'Iniciar Sesión')
@@ -130,6 +140,7 @@
         width: 100%; padding: 0.8rem; border-radius: 14px; border: 1.5px solid var(--sca-border, #e0e0e0);
         background: transparent; color: var(--sca-text-muted, #6c757d); font-weight: 600; font-size: 0.9rem;
         display: flex; align-items: center; justify-content: center; gap: 0.5rem; cursor: pointer; transition: all 0.2s;
+        text-decoration: none;
     }
     .login-kiosko-btn:hover { border-color: var(--l-green-3); color: var(--l-green-3); background: rgba(46,125,50,0.06); }
 
@@ -140,16 +151,10 @@
 
     .login-form-footer { text-align: center; margin-top: 1.8rem; font-size: 0.72rem; color: var(--sca-text-muted, #6c757d); }
 
-    .modal-icon-circle-kiosko {
-        width: 56px; height: 56px; border-radius: 50%; background: rgba(46,125,50,0.1); color: var(--l-green-3);
-        display: flex; align-items: center; justify-content: center; font-size: 1.5rem; margin: 0 auto 0.5rem;
-    }
-
     @media (max-width: 767px) {
         .login-brand { padding: 2.2rem 1.4rem; min-height: 52vh; }
         .login-form-side { padding: 2rem 1.25rem; }
         .login-form-card { padding: 2rem 1.5rem; border-radius: 20px; }
-        /* En pantallas angostas los dos paneles se apilan: se reduce la fruta a un solo acento por lado para que no se vea saturado */
         .login-manzana-cluster { width: 64px; height: 70px; bottom: 16px; left: auto; right: 14px; opacity: 0.85; }
         .login-pina-bl { width: 130px; height: 169px; }
         .login-manzana-tr { display: none; }
@@ -317,6 +322,11 @@
             <form method="POST" action="{{ route('login') }}">
                 @csrf
 
+                @if (session('success'))
+                    <div class="alert alert-success" style="border-radius:12px;">
+                        <i class="bi bi-check-circle-fill"></i> {{ session('success') }}
+                    </div>
+                @endif
                 @if ($errors->any())
                     <div class="login-error">
                         <i class="bi bi-exclamation-triangle-fill"></i> {{ $errors->first() }}
@@ -345,66 +355,19 @@
                 <button type="submit" class="login-submit-btn">
                     <i class="bi bi-box-arrow-in-right"></i> Ingresar al sistema
                 </button>
-                
+                <div class="text-center mt-3">
+                    <a href="{{ route('password.request') }}" class="text-muted small text-decoration-none">
+                        ¿Olvidó su contraseña?
+                    </a>
+                </div>
             </form>
-
             <p class="login-form-footer">&copy; {{ date('Y') }} SCA-QR &middot; Fruitex de México</p>
         </div>
     </div>
 </div>
 
-{{-- MODAL MODO KIOSKO --}}
-<div class="modal fade" id="kioskoModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content" style="border-radius: 20px;">
-            <div class="modal-body pt-4 px-4">
-                <div class="modal-icon-circle-kiosko">
-                    <i class="bi bi-tablet"></i>
-                </div>
-                <h5 class="modal-title text-center fw-bold mb-1">Activar Modo Kiosko</h5>
-                <p class="text-muted small text-center mb-4">Ingrese el PIN de seguridad, seleccione la planta y el modo de operación de este kiosco.</p>
-
-                <form action="{{ route('kiosko.activar') }}" method="POST">
-                    @csrf
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold">PIN de Seguridad</label>
-                        <input type="password" name="pin" class="form-control form-control-lg text-center"
-                               style="letter-spacing: 10px; font-size: 1.5rem;" required autofocus>
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold">Planta del Kiosco</label>
-                        <select name="planta_id" class="form-select form-select-lg" required>
-                            @foreach(\App\Models\Planta::where('activa', true)->orderBy('nombre')->get() as $p)
-                                <option value="{{ $p->id }}">{{ $p->nombre }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold">Modo de Operación</label>
-                        <select name="modo" class="form-select form-select-lg" required>
-                            <option value="mixto">Mixto (Detecta Entrada/Salida)</option>
-                            <option value="entrada">Solo Entradas</option>
-                            <option value="salida">Solo Salidas</option>
-                        </select>
-                    </div>
-
-                    <div id="kiosko-error" class="alert alert-danger d-none" style="border-radius: 10px;"></div>
-
-                    <div class="d-flex gap-2 mt-4 mb-2">
-                        <button type="button" class="btn btn-outline-secondary flex-fill" data-bs-dismiss="modal" style="border-radius: 12px;">Cancelar</button>
-                        <button type="submit" class="btn btn-success flex-fill" style="border-radius: 12px;">
-                            <i class="bi bi-tablet"></i> Activar Kiosko
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-</div>
-
 <script>
+    // Toggle de visibilidad de contraseña (sin cambios)
     function togglePasswordVisibility() {
         const input = document.getElementById('loginPassword');
         const icon = document.getElementById('loginPasswordIcon');
@@ -414,14 +377,7 @@
         icon.classList.toggle('bi-eye-slash', isHidden);
     }
 
-    // Si hay errores del kiosko, abrir el modal automáticamente
-    @if(session('kiosko_error'))
-        document.addEventListener('DOMContentLoaded', function() {
-            new bootstrap.Modal(document.getElementById('kioskoModal')).show();
-            const err = document.getElementById('kiosko-error');
-            err.textContent = '{{ session("kiosko_error") }}';
-            err.classList.remove('d-none');
-        });
-    @endif
+    {{-- V4: Eliminado el JS que abría el modal de kiosko con PIN --}}
+    {{-- Ya no hay modal; el enlace <a> redirige directamente a /kiosko/activar --}}
 </script>
 @endsection

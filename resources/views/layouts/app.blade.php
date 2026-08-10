@@ -328,6 +328,17 @@
         [data-bs-theme="dark"] .border-start { border-left-color: var(--sca-border) !important; }
         [data-bs-theme="dark"] .border-end { border-right-color: var(--sca-border) !important; }
 
+        /* Submenú sidebar */
+        #submenuSolicitudes .nav-link {
+            font-size: 0.85rem;
+            padding-left: 2rem;
+        }
+        #submenuSolicitudes .nav-link.active {
+            background: none;
+            color: var(--sca-primary);
+            font-weight: 600;
+        }
+
     </style>
     
     @stack('styles')
@@ -357,20 +368,38 @@
             <a href="{{ url('/') }}" class="nav-link">
                 <i class="bi bi-grid"></i> Dashboard
             </a>
-            
-            {{-- SOLICITUDES (Directo en el menú) --}}
-            @if(Auth::user()->isAprobador() || Auth::user()->isAdmin() || Auth::user()->isSuperadmin())
-                <a href="{{ route('solicitudes.bandeja') }}" class="nav-link">
-                    <i class="bi bi-inbox"></i> Bandeja Aprobaciones
+
+            {{-- SOLICITUDES CON SUBMENÚ (NO visible para Guardia) --}}
+            @if(!Auth::user()->isGuardia())
+            <div class="nav-item mb-1">
+                <a href="#" class="nav-link d-flex justify-content-between align-items-center" data-bs-toggle="collapse" data-bs-target="#submenuSolicitudes" aria-expanded="false">
+                    <span><i class="bi bi-file-earmark-text"></i> Solicitudes</span>
+                    <i class="bi bi-chevron-down" style="font-size: 0.8rem;"></i>
                 </a>
+                <div class="collapse ps-3" id="submenuSolicitudes">
+                    <a href="{{ route('solicitudes.create') }}" class="nav-link">
+                        <i class="bi bi-plus-circle"></i> Nueva Solicitud
+                    </a>
+                    <a href="{{ route('solicitudes.mis') }}" class="nav-link">
+                        <i class="bi bi-file-earmark-text"></i> Mis Solicitudes
+                    </a>
+                    @if(Auth::user()->isAprobador() || Auth::user()->isAdmin() || Auth::user()->isSuperadmin())
+                    <a href="{{ route('solicitudes.bandeja') }}" class="nav-link">
+                        <i class="bi bi-inbox"></i> Bandeja
+                    </a>
+                    <a href="{{ route('solicitudes.mis-aprobaciones') }}" class="nav-link">
+                        <i class="bi bi-check2-circle"></i> Mis Aprobaciones
+                    </a>
+                    @endif
+                    @if(Auth::user()->isAdmin() || Auth::user()->isSuperadmin())
+                    <a href="{{ route('solicitudes.historial') }}" class="nav-link">
+                        <i class="bi bi-clock-history"></i> Historial de Solicitudes
+                    </a>
+                    @endif
+                </div>
+            </div>
             @endif
-            <a href="{{ route('solicitudes.historial') }}" class="nav-link">
-                <i class="bi bi-clock-history"></i> @if(Auth::user()->isEmpleado()) Mis Solicitudes @else Historial Solicitudes @endif
-            </a>
-            <a href="{{ route('solicitudes.create') }}" class="nav-link">
-                <i class="bi bi-plus-circle"></i> Nueva Solicitud
-            </a>
-            
+
             @if(Auth::user()->isSuperadmin() || Auth::user()->isAdmin() || Auth::user()->isAprobador())
             <div class="nav-section-title">Gestión</div>
             <a href="{{ route('usuarios.index') }}" class="nav-link">
@@ -403,13 +432,16 @@
 
     <!-- ===== MAIN CONTENT ===== -->
     <div class="main-content">
-        <header class="topbar">
+                <header class="topbar">
             <button class="sidebar-toggle" id="sidebarToggle"><i class="bi bi-list"></i></button>
             
             <div class="d-flex align-items-center gap-3 ms-auto">
-                <div class="d-flex align-items-center gap-3 ms-auto">
-                {{-- NUEVO: Reloj en tiempo real --}}
+                {{-- NUEVO: Campana de notificaciones --}}
+                @include('partials._campana')
+
+                {{-- Reloj --}}
                 @include('partials._reloj', ['id' => 'topbar'])
+
                 {{-- BOTÓN MODO OSCURO --}}
                 <button class="theme-toggle" id="themeToggle" title="Cambiar tema">
                     <i class="bi bi-sun"></i>
@@ -427,6 +459,7 @@
                         @endif
                     </div>
                 </div>
+                
                 {{-- NUEVO: los guardias NO ven este botón (usan Terminar Turno en su dashboard) --}}
                 @if(!Auth::user()->isGuardia())
                 <form method="POST" action="{{ route('logout') }}">

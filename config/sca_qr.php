@@ -12,7 +12,4 @@ return [
     'exentos_revision' => [],
     'probabilidad_revision' => 10,
     'minutos_timeout_revision' => 5,
-    
-    // NUEVO: PIN para activar el modo kiosko (cámbialo cuando quieras)
-    'pin_kiosko' => env('PIN_KIOSKO', '2580'),
 ];

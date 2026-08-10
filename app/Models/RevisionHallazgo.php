@@ -33,3 +33,32 @@ class RevisionHallazgo extends Model
         return $this->belongsTo(Bitacora::class, 'bitacora_id');
     }
 }
+
+<?php
+// app/Models/RevisionHallazgo.php
+//
+// Hallazgos de la revisión exhaustiva F10.
+// Cuando el guardia revisa a un empleado (10% aleatorio), registra aquí
+// el resultado: todo_bien | anomalia, con descripción del hallazgo.
+//
+// CAMBIO V4: 'bitacora_id' → 'id_bitacora' (FK a bitacora).
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+class RevisionHallazgo extends Model
+{
+    protected $table = 'revision_hallazgos';
+    protected $primaryKey = 'id_hallazgo';
+
+    // Solo created_at (los hallazgos no se modifican)
+    public const UPDATED_AT = null;
+
+    protected $fillable = ['id_bitacora', 'resultado', 'descripcion_hallazgo'];
+
+    public function bitacora()
+    {
+        return $this->belongsTo(Bitacora::class, 'id_bitacora', 'id_bitacora');
+    }
+}

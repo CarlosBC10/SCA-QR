@@ -16,9 +16,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // Alias 'role' para usar ->middleware('role:Superadmin,Admin')
         $middleware->alias([
             'role' => \App\Http\Middleware\CheckRole::class,
+            'debe_cambiar_password' => \App\Http\Middleware\DebeCambiarPassword::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

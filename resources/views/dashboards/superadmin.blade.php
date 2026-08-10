@@ -1,4 +1,15 @@
 {{-- resources/views/dashboards/superadmin.blade.php --}}
+{{--
+    Panel de Superadmin.
+    Muestra estadísticas globales del sistema + accesos rápidos.
+
+    CAMBIOS V4:
+      - Eliminada la referencia a \App\Models\Credencial (modelo eliminado).
+        Ahora se cuentan QRs activos en SolicitudExternoDetalle.
+      - Eliminada la referencia a \App\Models\Solicitud (modelo eliminado).
+      - UsuarioSca::count() → UsuarioSca::whereNull('fecha_baja')->count()
+        (en V4 no hay columna 'activo'; un usuario está activo si no tiene fecha_baja).
+--}}
 @extends('layouts.app')
 
 @section('title', 'Panel Superadmin')
@@ -10,20 +21,27 @@
 </div>
 
 @php
+    // Conteo de puestos clasificados vs sin clasificar
     $puestosTotales = \App\Models\Sitec\Puesto::count();
     $puestosClasificados = \App\Models\PuestoTipoEmpleado::count();
     $puestosSinClasificar = $puestosTotales - $puestosClasificados;
+
+    // V4: Credencial eliminado; contar QRs activos en solicitud_externo_detalle
+    // Un QR está activo si estado_qr='autorizado' (la solicitud ext padre debe estar aprobada)
+    $credencialesActivas = \App\Models\SolicitudExternoDetalle::where('estado_qr', 'autorizado')->count();
 @endphp
 
 {{-- Stats Cards --}}
 <div class="row g-4 mb-4">
+    {{-- Usuarios web activos --}}
     <div class="col-xl-3 col-md-6 animate-fade-in-up" style="animation-delay: 0.1s;">
         <div class="card card-hover border-0 h-100" style="border-radius: 16px; overflow: hidden;">
             <div class="card-body p-4 position-relative">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
                         <div class="text-muted small text-uppercase fw-bold mb-2" style="font-size: 0.75rem; letter-spacing: 0.5px;">Usuarios Web</div>
-                        <div class="h2 fw-bold mb-0">{{ \App\Models\UsuarioSca::count() }}</div>
+                        {{-- V4: whereNull('fecha_baja') reemplaza where('activo', true) --}}
+                        <div class="h2 fw-bold mb-0">{{ \App\Models\UsuarioSca::whereNull('fecha_baja')->count() }}</div>
                     </div>
                     <div class="rounded-3 p-3" style="background: rgba(46,125,50,0.1); color: #2e7d32;">
                         <i class="bi bi-people-fill fs-4"></i>
@@ -33,7 +51,8 @@
             </div>
         </div>
     </div>
-    
+
+    {{-- Empleados sincronizados desde sitec --}}
     <div class="col-xl-3 col-md-6 animate-fade-in-up" style="animation-delay: 0.2s;">
         <div class="card card-hover border-0 h-100" style="border-radius: 16px; overflow: hidden;">
             <div class="card-body p-4 position-relative">
@@ -50,7 +69,8 @@
             </div>
         </div>
     </div>
-    
+
+    {{-- Accesos de hoy (entradas + salidas) --}}
     <div class="col-xl-3 col-md-6 animate-fade-in-up" style="animation-delay: 0.3s;">
         <div class="card card-hover border-0 h-100" style="border-radius: 16px; overflow: hidden;">
             <div class="card-body p-4 position-relative">
@@ -67,20 +87,21 @@
             </div>
         </div>
     </div>
-    
+
+    {{-- Credenciales QR activas (V4: desde SolicitudExternoDetalle) --}}
     <div class="col-xl-3 col-md-6 animate-fade-in-up" style="animation-delay: 0.4s;">
         <div class="card card-hover border-0 h-100" style="border-radius: 16px; overflow: hidden;">
             <div class="card-body p-4 position-relative">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
                         <div class="text-muted small text-uppercase fw-bold mb-2" style="font-size: 0.75rem; letter-spacing: 0.5px;">Credenciales</div>
-                        <div class="h2 fw-bold mb-0">{{ \App\Models\Credencial::where('activa', true)->count() }}</div>
+                        <div class="h2 fw-bold mb-0">{{ $credencialesActivas }}</div>
                     </div>
                     <div class="rounded-3 p-3" style="background: rgba(220,53,69,0.1); color: #dc3545;">
                         <i class="bi bi-qr-code fs-4"></i>
                     </div>
                 </div>
-                <div class="mt-3 small text-muted">Activas para externos</div>
+                <div class="mt-3 small text-muted">QRs activos para externos</div>
             </div>
         </div>
     </div>

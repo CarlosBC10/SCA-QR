@@ -58,29 +58,57 @@
         </a>
     </div>
 
-    {{-- TARJETA: HISTORIAL / MIS SOLICITUDES (Para todos) --}}
+    {{-- TARJETA: MIS SOLICITUDES (Para todos) --}}
     <div class="col-md-4">
-        <a href="{{ route('solicitudes.historial') }}" class="text-decoration-none">
+        <a href="{{ route('solicitudes.mis') }}" class="text-decoration-none">
             <div class="card border-0 shadow-sm h-100 sca-card card-hover" style="border-radius: 16px; border-top: 4px solid #17a2b8 !important;">
                 <div class="card-body p-4 text-center d-flex flex-column align-items-center">
                     <div class="rounded-circle d-flex align-items-center justify-content-center mb-3" 
                          style="width: 60px; height: 60px; background: rgba(23,162,184,0.15);">
                         <i class="bi bi-clock-history fs-2" style="color: #17a2b8;"></i>
                     </div>
-                    <h5 class="fw-bold mb-1">
-                        @if(Auth::user()->isEmpleado())
-                            Mis Solicitudes
-                        @elseif(Auth::user()->isAprobador())
-                            Solicitudes de mi Planta
-                        @else
-                            Todas las Solicitudes
-                        @endif
-                    </h5>
-                    <p class="text-muted small mb-2">Consulte el historial y estado de solicitudes</p>
+                    <h5 class="fw-bold mb-1">Mis Solicitudes</h5>
+                    <p class="text-muted small mb-2">Consulte las solicitudes que ha creado</p>
                 </div>
             </div>
         </a>
     </div>
+
+    {{-- TARJETA: MIS APROBACIONES (Solo Aprobador, Admin, Superadmin) --}}
+    @if(Auth::user()->isAprobador() || Auth::user()->isAdmin() || Auth::user()->isSuperadmin())
+    <div class="col-md-4">
+        <a href="{{ route('solicitudes.mis-aprobaciones') }}" class="text-decoration-none">
+            <div class="card border-0 shadow-sm h-100 sca-card card-hover" style="border-radius: 16px; border-top: 4px solid #6f42c1 !important;">
+                <div class="card-body p-4 text-center d-flex flex-column align-items-center">
+                    <div class="rounded-circle d-flex align-items-center justify-content-center mb-3" 
+                         style="width: 60px; height: 60px; background: rgba(111,66,193,0.15);">
+                        <i class="bi bi-check2-square fs-2" style="color: #6f42c1;"></i>
+                    </div>
+                    <h5 class="fw-bold mb-1">Mis Aprobaciones</h5>
+                    <p class="text-muted small mb-2">Solicitudes que ha aprobado o rechazado</p>
+                </div>
+            </div>
+        </a>
+    </div>
+    @endif
+
+    {{-- TARJETA: HISTORIAL GENERAL (Solo Admin, Superadmin) --}}
+    @if(Auth::user()->isAdmin() || Auth::user()->isSuperadmin())
+    <div class="col-md-4">
+        <a href="{{ route('solicitudes.historial') }}" class="text-decoration-none">
+            <div class="card border-0 shadow-sm h-100 sca-card card-hover" style="border-radius: 16px; border-top: 4px solid #dc3545 !important;">
+                <div class="card-body p-4 text-center d-flex flex-column align-items-center">
+                    <div class="rounded-circle d-flex align-items-center justify-content-center mb-3" 
+                         style="width: 60px; height: 60px; background: rgba(220,53,69,0.15);">
+                        <i class="bi bi-archive fs-2" style="color: #dc3545;"></i>
+                    </div>
+                    <h5 class="fw-bold mb-1">Historial General</h5>
+                    <p class="text-muted small mb-2">Todas las solicitudes del sistema</p>
+                </div>
+            </div>
+        </a>
+    </div>
+    @endif
 
 </div>
 @endsection

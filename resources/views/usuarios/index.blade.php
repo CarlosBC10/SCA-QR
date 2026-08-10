@@ -1,4 +1,11 @@
 {{-- resources/views/usuarios/index.blade.php --}}
+{{--
+    CAMBIOS V4:
+      - Filtros: id → id_rol, id → id_planta.
+      - Estado: usa fecha_baja (null=activo, not-null=inactivo) via accessor $u->activo.
+      - created_at: ya no existe en usuarios_sca (usa fecha_alta).
+      - Desactivar: usa $u->id_usuario_sca en lugar de $u->id.
+--}}
 @extends('layouts.app')
 
 @section('title', 'Gestión de Usuarios')
@@ -14,20 +21,19 @@
     </a>
 </div>
 
-{{-- Filtros (UI-22) --}}
 <form method="GET" class="card border-0 shadow-sm mb-3">
     <div class="card-body">
         <div class="row g-2 align-items-end">
             <div class="col-md-3">
                 <label class="form-label small">Buscar por usuario</label>
-                <input type="text" name="buscar" class="form-control" value="{{ request('buscar') }}" placeholder="Ej: 1001">
+                <input type="text" name="buscar" class="form-control" value="{{ request('buscar') }}" placeholder="ID, Nombre o Usuario">            
             </div>
             <div class="col-md-3">
                 <label class="form-label small">Rol</label>
                 <select name="rol" class="form-select">
                     <option value="">Todos</option>
                     @foreach($roles as $r)
-                        <option value="{{ $r->id }}" @if(request('rol')==$r->id) selected @endif>{{ $r->nombre }}</option>
+                        <option value="{{ $r->id_rol }}" @if(request('rol')==$r->id_rol) selected @endif>{{ $r->nombre }}</option>
                     @endforeach
                 </select>
             </div>
@@ -36,7 +42,7 @@
                 <select name="planta" class="form-select">
                     <option value="">Todas</option>
                     @foreach($plantas as $p)
-                        <option value="{{ $p->id }}" @if(request('planta')==$p->id) selected @endif>{{ $p->nombre }}</option>
+                        <option value="{{ $p->id_planta }}" @if(request('planta')==$p->id_planta) selected @endif>{{ $p->nombre }}</option>
                     @endforeach
                 </select>
             </div>
@@ -57,7 +63,6 @@
     </div>
 </form>
 
-{{-- Tabla (UI-26: table-responsive) --}}
 <div class="card border-0 shadow-sm">
     <div class="table-responsive">
         <table class="table table-hover mb-0">
@@ -68,7 +73,7 @@
                     <th>Rol</th>
                     <th>Planta</th>
                     <th>Estado</th>
-                    <th>Creado</th>
+                    <th>Alta</th>
                     <th width="120">Acciones</th>
                 </tr>
             </thead>
@@ -87,26 +92,42 @@
                     </td>
                     <td>{{ $u->planta_nombre }}</td>
                     <td>
+                        {{-- V4: $u->activo es un accessor que revisa fecha_baja --}}
                         @if($u->activo)
                             <span class="badge bg-success">Activo</span>
                         @else
                             <span class="badge bg-secondary">Inactivo</span>
                         @endif
                     </td>
-                    <td class="small text-muted">{{ $u->created_at->format('d/m/Y') }}</td>
+                    <td class="small text-muted">{{ $u->fecha_alta?->format('d/m/Y') ?? '—' }}</td>
                     <td>
-                        <a href="{{ route('usuarios.edit', $u) }}" class="btn btn-sm btn-outline-primary" title="Editar">
-                            <i class="bi bi-pencil"></i>
-                        </a>
-                        @if($u->id !== Auth::id() && $u->activo)
-                        <form method="POST" action="{{ route('usuarios.destroy', $u) }}" class="d-inline">
-                            @csrf
-                            @method('DELETE')
-                            <button type="button" class="btn btn-sm btn-outline-danger btn-desactivar" data-nombre="{{ $u->username }}" title="Desactivar">
-                                <i class="bi bi-person-x"></i>
-                            </button>
-                        </form>
-                        @endif
+                        <div class="d-flex gap-1">
+                            {{-- Editar --}}
+                            <a href="{{ route('usuarios.edit', $u) }}" class="btn btn-sm btn-outline-primary" title="Editar">
+                                <i class="bi bi-pencil"></i>
+                            </a>
+
+                            {{-- FIX I: Resetear contraseña (Solo empleados internos, no guardias) --}}
+                            @if($u->id_usuario_sca !== Auth::id() && !$u->esGuardia())
+                            <form action="{{ route('usuarios.reset-password', $u->id_usuario_sca) }}" method="POST" onsubmit="return confirm('¿Resetear contraseña y enviar por correo a {{ $u->email_emp }}?')" style="display:inline;">
+                                @csrf
+                                <button type="submit" class="btn btn-sm btn-outline-warning" title="Resetear contraseña">
+                                    <i class="bi bi-key"></i>
+                                </button>
+                            </form>
+                            @endif
+
+                            {{-- Desactivar --}}
+                            @if($u->id_usuario_sca !== Auth::id() && $u->activo)
+                            <form method="POST" action="{{ route('usuarios.destroy', $u) }}" class="d-inline">
+                                @csrf
+                                @method('DELETE')
+                                <button type="button" class="btn btn-sm btn-outline-danger btn-desactivar" data-nombre="{{ $u->username }}" title="Desactivar">
+                                    <i class="bi bi-person-x"></i>
+                                </button>
+                            </form>
+                            @endif
+                        </div>
                     </td>
                 </tr>
                 @empty
@@ -125,7 +146,6 @@
 
 @push('scripts')
 <script>
-// Modal de confirmación para desactivar (UI-28)
 document.querySelectorAll('.btn-desactivar').forEach(btn => {
     btn.addEventListener('click', function(e) {
         e.preventDefault();

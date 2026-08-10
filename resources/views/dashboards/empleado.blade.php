@@ -1,4 +1,13 @@
 {{-- resources/views/dashboards/empleado.blade.php --}}
+{{--
+    Panel de Empleado.
+    Muestra accesos rápidos: nueva solicitud + mis solicitudes.
+
+    CAMBIO V4:
+      - El enlace "Mis Solicitudes" apuntaba a solicitudes.historial (ruta que
+        es solo para Admin/Superadmin y daría error 403). Ahora apunta a
+        solicitudes.mis (que es para cualquier usuario autenticado).
+--}}
 @extends('layouts.app')
 
 @section('title', 'Panel Empleado')
@@ -10,7 +19,7 @@
 </div>
 
 <div class="row g-4">
-    
+
     {{-- Atajo: Nueva Solicitud --}}
     <div class="col-md-6">
         <a href="{{ route('solicitudes.create') }}" class="text-decoration-none">
@@ -29,8 +38,9 @@
     </div>
 
     {{-- Atajo: Mis Solicitudes --}}
+    {{-- V4: ruta renombrada de solicitudes.historial a solicitudes.mis --}}
     <div class="col-md-6">
-        <a href="{{ route('solicitudes.historial') }}" class="text-decoration-none">
+        <a href="{{ route('solicitudes.mis') }}" class="text-decoration-none">
             <div class="card border-0 shadow-sm h-100 sca-card card-hover" style="border-radius: 16px; border-left: 4px solid #17a2b8 !important;">
                 <div class="card-body d-flex align-items-center">
                     <div class="rounded-3 p-3 me-3" style="background: rgba(23,162,184,0.15);">

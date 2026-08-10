@@ -1,8 +1,9 @@
 <?php
 // app/Models/Planta.php
 //
-// Representa la tabla plantas.
-// Catálogo fijo de las 3 plantas físicas de Fruitex: Jardin, Sauces, Partidas.
+// Catálogo de plantas físicas (Jardin, Sauces, Partidas).
+// PK: id_planta. Sin cambios estructurales; solo alineamos las relaciones
+// a los nuevos nombres de FK (id_planta en lugar de planta_id).
 
 namespace App\Models;
 
@@ -11,16 +12,44 @@ use Illuminate\Database\Eloquent\Model;
 class Planta extends Model
 {
     protected $table = 'plantas';
+    protected $primaryKey = 'id_planta';
 
     protected $fillable = ['nombre', 'direccion', 'activa'];
-
-    // 'activa' se lee como boolean (true/false), no 1/0
     protected $casts = ['activa' => 'boolean'];
 
-    // --- Relaciones: una planta tiene muchos... ---
-    public function guardias()     { return $this->hasMany(Guardia::class, 'planta_id'); }
-    public function empleadosExt() { return $this->hasMany(EmpleadoExtSca::class, 'planta_id'); }
-    public function personas()     { return $this->hasMany(Persona::class, 'planta_id'); }
-    public function solicitudes()  { return $this->hasMany(Solicitud::class, 'planta_destino_id'); }
-    public function bitacoras()    { return $this->hasMany(Bitacora::class, 'planta_id'); }
+    // Guardias asignados a esta planta
+    public function guardias()
+    {
+        return $this->hasMany(Guardia::class, 'id_planta', 'id_planta');
+    }
+
+    // Extensiones SCA de empleados cuya planta derivada es esta
+    public function empleadosExt()
+    {
+        return $this->hasMany(EmpleadoExtSca::class, 'id_planta', 'id_planta');
+    }
+
+    // Solicitudes internas donde esta planta es origen
+    public function solicitudesIntOrigen()
+    {
+        return $this->hasMany(SolicitudInt::class, 'id_planta_origen', 'id_planta');
+    }
+
+    // Solicitudes internas donde esta planta es destino
+    public function solicitudesIntDestino()
+    {
+        return $this->hasMany(SolicitudInt::class, 'id_planta_destino', 'id_planta');
+    }
+
+    // Solicitudes externas donde esta planta es destino (la visita)
+    public function solicitudesExtDestino()
+    {
+        return $this->hasMany(SolicitudExt::class, 'id_planta_destino', 'id_planta');
+    }
+
+    // Eventos de bitácora registrados en esta planta
+    public function bitacoras()
+    {
+        return $this->hasMany(Bitacora::class, 'id_planta', 'id_planta');
+    }
 }

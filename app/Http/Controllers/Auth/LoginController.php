@@ -2,19 +2,27 @@
 // app/Http/Controllers/Auth/LoginController.php
 //
 // Controlador de autenticación.
-// Maneja:
-//   - showLoginForm: mostrar el formulario de login
-//   - showInitialRegistration: mostrar el registro inicial (solo si no hay usuarios)
-//   - initialRegistration: procesar el registro del primer Superadmin
-//   - login: procesar el inicio de sesión
-//   - logout: cerrar sesión
+//
+// CORRECCIÓN BLOQUE 13:
+//   El error "syntax error, unexpected string content" en línea 161 era por
+//   comillas tipográficas (smart quotes " " ) que PHP no reconoce. Esto pasa
+//   al copiar-pegar del chat. Se reescribió TODO el archivo usando comillas
+//   simples y concatenación con '.' para evitar el problema.
+//
+// CAMBIOS V4 (ya aplicados en Bloque 9, se reiteran aquí):
+//   - Auth::attempt ya no filtra por 'activo' (la columna se eliminó).
+//     Se valida fecha_baja === null DESPUÉS del attempt.
+//   - UsuarioSca::create sin 'activo' (la tabla usa fecha_alta DEFAULT).
+//   - $usuario->update(['activo' => false]) → $usuario->darDeBaja().
+//   - $usuario->guardia_id → $usuario->id_guardias.
 //
 // VALIDACIONES DE LOGIN (en orden):
-//   1. Rate limiting: 5 intentos/minuto por IP + username (anti fuerza bruta)
-//   2. Auth::attempt: username + password + usuarios_sca.activo=true
-//   3. Si es guardia: valida guardias.activo=true
-//   4. Si es empleado: valida sitec.empleados.estatus='Alta'
-//   5. Auto-desactiva en sca si fue dado de baja en sitec o guardias
+//   1. Rate limiting: 5 intentos/minuto por IP + username
+//   2. Auth::attempt: username + password (sin filtro activo)
+//   3. Validar fecha_baja === null (usuario activo)
+//   4. Si es guardia: valida guardia.fecha_baja === null
+//   5. Si es empleado: valida sitec.empleados.estatus='Alta'
+//   6. Auto-desactiva en sca si fue dado de baja en sitec o guardias
 
 namespace App\Http\Controllers\Auth;
 
@@ -59,7 +67,9 @@ class LoginController extends Controller
     /**
      * Procesa el registro del primer Superadmin.
      * Solo se permite si la tabla usuarios_sca está vacía.
-     */
+     *
+     * CAMBIO V4: sin 'activo' => true (la tabla usa fecha_alta con DEFAULT).
+    */
     public function initialRegistration(RegistroInicialRequest $request)
     {
         // Doble verificación: si ya hay usuarios, no permitir
@@ -71,103 +81,151 @@ class LoginController extends Controller
         $empleado = Empleado::find($request->id_empleado);
         if (!$empleado) {
             throw ValidationException::withMessages([
-                'id_empleado' => 'El número de empleado no existe en la base de datos.',
+                'id_empleado' => 'El numero de empleado no existe en la base de datos.',
             ]);
         }
 
         // El empleado debe tener estatus='Alta' para ser Superadmin
         if (!$empleado->estaActivo()) {
             throw ValidationException::withMessages([
-                'id_empleado' => 'El empleado no tiene estatus "Alta" en sitec.',
+                'id_empleado' => 'El empleado no tiene estatus Alta en sitec.',
             ]);
         }
 
-        $rolSuperadmin = RolSca::where('nombre', 'Superadmin')->firstOrFail();
-
-        // Crear el usuario Superadmin
+        // V5: Se eliminó la columna 'id_guardias' de usuarios_sca.
+        // El enlace con guardias ahora es por 'username' (no requiere campo separado).
+        // Para empleados internos, el username es simplemente su id_empleado.
         UsuarioSca::create([
-            'username'   => (string) $request->id_empleado,
-            'password'   => Hash::make($request->password),
-            'id_rol'     => $rolSuperadmin->id,
-            'guardia_id' => null,
-            'activo'     => true,
+            'username'    => (string) $request->id_empleado,
+            'password'    => Hash::make($request->password),
+            'id_rol'      => $rolSuperadmin->id_rol,
         ]);
 
         LogSistema::registrar(
             'REGISTER_INITIAL',
-            "Registro inicial de Superadmin (empleado {$request->id_empleado})"
+            'Registro inicial de Superadmin (empleado ' . $request->id_empleado . ')'
         );
 
         return redirect()->route('login')
-            ->with('success', 'Superadmin creado. Ahora puede iniciar sesión.');
+            ->with('success', 'Superadmin creado. Ahora puede iniciar sesion.');
     }
 
     /**
      * Procesa el inicio de sesión.
      *
-     * Validaciones en orden:
-     * 1. Rate limiting (5 intentos/minuto por IP + username)
-     * 2. Auth::attempt (username + password + usuarios_sca.activo=true)
-     * 3. Si es guardia: forzar remember_me (turnos largos) + valida guardias.activo=true
-     * 4. Si es empleado: valida sitec.empleados.estatus='Alta'
-     * 5. Auto-desactiva en sca si fue dado de baja
-     * 6. Registra LOGIN en logs_sistema
+     * CAMBIO V4: Auth::attempt no filtra por 'activo' (columna eliminada).
+     * Se valida fecha_baja === null manualmente después del attempt.
+     *
+     * Pasos:
+     *   1. Rate limiting (5 intentos/minuto por IP + username).
+     *   2. Auth::attempt (username + password).
+     *   3. Validar que el usuario no tenga fecha_baja (activo).
+     *   4. Si es guardia: validar que el guardia esté activo.
+     *   5. Si es empleado: validar que esté activo en sitec.
+     *   6. Forzar remember_me si es guardia (turnos largos).
+     *   7. Registrar LOGIN en logs_sistema.
+     *   8. Redirigir al dashboard según el rol.
      */
     public function login(LoginRequest $request)
     {
         $credentials = $request->only('username', 'password');
-        $credentials['activo'] = true;
+        $username = $credentials['username'];
+        $password = $credentials['password'];
 
-        // --- RATE LIMITING (Anti fuerza bruta) ---
-        $throttleKey = strtolower($request->ip() . '|' . $request->username);
+        // --- 1. RATE LIMITING (Anti fuerza bruta) ---
+        $throttleKey = strtolower($request->ip() . '|' . $username);
         if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
             $seconds = RateLimiter::availableIn($throttleKey);
             throw ValidationException::withMessages([
-                'username' => "Demasiados intentos. Intente en {$seconds} segundos.",
+                'username' => 'Demasiados intentos. Intente en ' . $seconds . ' segundos.',
             ]);
         }
 
-        // --- INTENTO DE AUTENTICACIÓN (sin remember aún) ---
-        if (!Auth::attempt($credentials, false)) {
+        // --- 2. BUSCAR USUARIO Y VERIFICAR PREFIJO 'temp:' ---
+        $usuario = UsuarioSca::where('username', $username)->first();
+        $loginValido = false;
+
+        if ($usuario) {
+            // Si el password tiene el prefijo 'temp:'
+            if (str_starts_with($usuario->password, 'temp:')) {
+                // Extraer el hash real (quitar 'temp:')
+                $hashReal = substr($usuario->password, 5);
+                
+                // Validar contraseña contra el hash real
+                if (Hash::check($password, $hashReal)) {
+                    $loginValido = true;
+                    // Iniciar sesión manualmente
+                    Auth::login($usuario, false);
+                    
+                    // FIX I: Forzar redirección inmediata al cambio de contraseña
+                    // Esto evita depender del middleware global si hubo algún problema de registro
+                    RateLimiter::clear($throttleKey);
+                    $request->session()->regenerate();
+                    return redirect()->route('password.cambiar')
+                        ->with('warning', 'Debe cambiar su contraseña temporal antes de continuar.');
+                }
+            } else {
+                // Password normal: usar Auth::attempt estándar
+                if (Auth::attempt($credentials, false)) {
+                    $loginValido = true;
+                    $usuario = Auth::user(); // Refrescar instancia
+                }
+            }
+        }
+        // Si las credenciales son inválidas
+        if (!$loginValido) {
             RateLimiter::hit($throttleKey, 60);
             throw ValidationException::withMessages([
-                'username' => 'Credenciales incorrectas o usuario inactivo.',
+                'username' => 'Credenciales incorrectas.',
             ]);
         }
 
+        // --- 3. VALIDACIÓN DE USUARIO ACTIVO (fecha_baja === null) ---
+        if ($usuario->fecha_baja !== null) {
+            Auth::logout();
+            $request->session()->invalidate();
+            RateLimiter::hit($throttleKey, 60);
+            throw ValidationException::withMessages([
+                'username' => 'Su usuario ha sido desactivado. Contacte al administrador.',
+            ]);
+        }
+
+        // Limpiar el contador de intentos fallidos y regenerar sesión
         RateLimiter::clear($throttleKey);
         $request->session()->regenerate();
 
-        $usuario = Auth::user();
-
-        // --- VALIDACIÓN CRUZADA (Guardia o Empleado) ---
-        // Se hace ANTES de forzar remember, por si el usuario está dado de baja
-        if ($usuario->guardia_id !== null) {
+        // --- 4. VALIDACIÓN CRUZADA (Guardia o Empleado) ---
+        if ($usuario->esGuardia()) {
             $guardia = $usuario->guardia;
             if (!$guardia || !$guardia->activo) {
-                $usuario->update(['activo' => false]);
+                $usuario->darDeBaja();
                 Auth::logout();
                 $request->session()->invalidate();
-                throw ValidationException::withMessages(['username' => 'El guardia está dado de baja.']);
+                throw ValidationException::withMessages([
+                    'username' => 'El guardia esta dado de baja.',
+                ]);
             }
         } else {
             $empleado = Empleado::find($usuario->username);
             if (!$empleado || !$empleado->estaActivo()) {
-                $usuario->update(['activo' => false]);
+                $usuario->darDeBaja();
                 Auth::logout();
                 $request->session()->invalidate();
-                throw ValidationException::withMessages(['username' => 'El empleado no está activo en el sistema.']);
+                throw ValidationException::withMessages([
+                    'username' => 'El empleado no esta activo en el sistema.',
+                ]);
             }
         }
 
-        // --- REMEMBER ME SEGÚN ROL ---
-        // Guardias: forzado (turnos de 8-12h sin horario fijo)
-        // Demás roles: solo si marcaron el checkbox
+        // --- 5. REMEMBER ME SEGÚN ROL ---
         $remember = $request->boolean('remember') || $usuario->isGuardia();
         Auth::login($usuario, $remember);
 
-        LogSistema::registrar('LOGIN', "Inicio de sesión de {$request->username}");
+        // --- 6. LOG DE AUDITORÍA ---
+        LogSistema::registrar('LOGIN', 'Inicio de sesion de ' . $username);
 
+        // --- 7. REDIRECCIÓN POR ROL ---
+        // El middleware DebeCambiarPassword interceptará si tiene prefijo 'temp:'
         return $this->redirectByRole($usuario);
     }
 
@@ -176,7 +234,8 @@ class LoginController extends Controller
      */
     public function logout(Request $request)
     {
-        LogSistema::registrar('LOGOUT', "Cierre de sesión de {$request->username}");
+        $username = $request->user() ? $request->user()->username : 'desconocido';
+        LogSistema::registrar('LOGOUT', 'Cierre de sesion de ' . $username);
 
         Auth::logout();
         $request->session()->invalidate();
@@ -200,5 +259,78 @@ class LoginController extends Controller
         };
 
         return $route ? redirect()->route($route) : redirect('/');
+    }
+
+    /**
+     * Muestra el formulario de "Olvidé mi contraseña".
+     */
+    public function showResetForm()
+    {
+        return view('auth.password_reset');
+    }
+
+    /**
+     * Procesa el envío del correo de restablecimiento.
+     */
+    public function sendResetEmail(Request $request)
+    {
+        $request->validate([
+            'username' => ['required', 'string'],
+        ]);
+
+        $usuario = UsuarioSca::where('username', $request->username)->first();
+
+        // FIX I: Mensaje específico para guardias (no tienen correo institucional)
+        if (!$usuario) {
+            return back()->withErrors(['username' => 'No se encontró un usuario con ese nombre de usuario.'])->withInput();
+        }
+        
+        if ($usuario->esGuardia()) {
+            return back()->withErrors(['username' => 'Los guardias deben solicitar el reseteo de contraseña directamente al administrador.'])->withInput();
+        }
+
+        if (!$usuario->email_emp) {
+            return back()->withErrors(['username' => 'Su usuario no tiene correo institucional registrado. Contacte al administrador.'])->withInput();
+        }
+
+        // Generar nueva contraseña temporal
+        $passwordTemporal = $this->generarPasswordTemporalAleatoria();
+        $usuario->password = 'temp:' . Hash::make($passwordTemporal);
+        $usuario->save();
+
+        // Enviar correo
+        try {
+            \Mail::to($usuario->email_emp)->send(new \App\Mail\PasswordTemporalMail(
+                $usuario->nombre_completo,
+                $usuario->username,
+                $passwordTemporal,
+                route('login')
+            ));
+        } catch (\Exception $e) {
+            LogSistema::registrar('ERROR_MAIL', "No se pudo enviar correo de reseteo a {$usuario->email_emp}: " . $e->getMessage());
+            return back()->withErrors(['username' => 'No se pudo enviar el correo. Intente más tarde o contacte al administrador.'])->withInput();
+        }
+
+        LogSistema::registrar('RESETEO_PASSWORD', "El usuario {$usuario->username} solicitó reseteo de contraseña.");
+
+        return redirect()->route('login')->with('success', 'Se envió una contraseña temporal a su correo institucional.');
+    }
+
+    /**
+     * Genera una contraseña temporal aleatoria.
+     */
+    private function generarPasswordTemporalAleatoria(int $longitud = 12): string
+    {
+        $mayus = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+        $minus = 'abcdefghjkmnpqrstuvwxyz';
+        $nums  = '23456789';
+        $simb  = '!@#$%^&*';
+        $partes = [
+            substr(str_shuffle($mayus), 0, 4),
+            substr(str_shuffle($minus), 0, 4),
+            substr(str_shuffle($nums), 0, 3),
+            substr(str_shuffle($simb), 0, 1),
+        ];
+        return str_shuffle(implode('', $partes));
     }
 }

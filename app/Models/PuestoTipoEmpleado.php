@@ -1,5 +1,11 @@
 <?php
 // app/Models/PuestoTipoEmpleado.php
+//
+// Clasificación de puestos de sitec → tipo de empleado (operativo/admin/corp).
+// Permite clasificar masivamente a todos los empleados con un mismo puesto.
+//
+// CAMBIO V4: en reclasificarPuesto(), eliminamos 'bloqueo_manual' => false
+// del insert masivo (la columna ya no existe) y agregamos 'fecha_ultimo_manual' => null.
 
 namespace App\Models;
 
@@ -22,7 +28,10 @@ class PuestoTipoEmpleado extends Model
     }
 
     /**
-     * OPTIMIZADO: usa upsert masivo en vez de SELECT + UPDATE + INSERT separados.
+     * Reclasifica un puesto: actualiza el tipo de empleado para todos
+     * los empleados con ese puesto.
+     *
+     * CAMBIO V4: sin 'bloqueo_manual', con 'fecha_ultimo_manual' => null.
      */
     public static function reclasificarPuesto(int $idPuesto, string $nuevoTipo): int
     {
@@ -65,9 +74,9 @@ class PuestoTipoEmpleado extends Model
                 $insertData[] = [
                     'empleado_id' => $id,
                     'tipo_empleado' => $nuevoTipo,
-                    'planta_id' => null,
+                    'id_planta' => null,
                     'usos_manuales_restantes' => 4,
-                    'bloqueo_manual' => false,
+                    'fecha_ultimo_manual' => null,  // V4: reemplaza a bloqueo_manual
                     'created_at' => $now,
                     'updated_at' => $now,
                 ];
@@ -82,12 +91,6 @@ class PuestoTipoEmpleado extends Model
         return $totalEmpleados;
     }
 
-
-
-
-
-    
-    
     public static function contarEmpleadosConPuesto(int $idPuesto): int
     {
         return \App\Models\Sitec\Empleado::on('sitec')

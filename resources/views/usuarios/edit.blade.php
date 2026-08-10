@@ -1,4 +1,12 @@
 {{-- resources/views/usuarios/edit.blade.php --}}
+{{--
+    CAMBIOS V4:
+      - Roles: id → id_rol.
+      - Plantas: id → id_planta.
+      - Estado: activo via accessor (fecha_baja null).
+      - $usuario->guardia_id → $usuario->esGuardia() / $usuario->id_guardias.
+      - created_at no existe → usar fecha_alta.
+--}}
 @extends('layouts.app')
 
 @section('title', 'Editar Usuario')
@@ -6,7 +14,13 @@
 @section('content')
 <div class="mb-4">
     <h1 class="h3 mb-0">Editar Usuario</h1>
-    <p class="text-muted mb-0">{{ $usuario->nombre_completo }} · <span class="font-monospace">{{ $usuario->username }}</span></p>
+    <p class="text-muted mb-0">
+        {{ $usuario->nombre_completo }} ·
+        <span class="font-monospace">{{ $usuario->username }}</span>
+        @if($usuario->fecha_baja)
+            <span class="badge bg-secondary ms-2">Inactivo desde {{ $usuario->fecha_baja->format('d/m/Y') }}</span>
+        @endif
+    </p>
 </div>
 
 <form method="POST" action="{{ route('usuarios.update', $usuario) }}">
@@ -20,7 +34,7 @@
                     <label class="form-label">Rol</label>
                     <select name="id_rol" class="form-select" required>
                         @foreach($rolesPermitidos as $r)
-                            <option value="{{ $r->id }}" @if(old('id_rol', $usuario->id_rol)==$r->id) selected @endif>{{ $r->nombre }}</option>
+                            <option value="{{ $r->id_rol }}" @if(old('id_rol', $usuario->id_rol)==$r->id_rol) selected @endif>{{ $r->nombre }}</option>
                         @endforeach
                     </select>
                 </div>
@@ -31,10 +45,15 @@
                         <option value="1" @if(old('activo', $usuario->activo)) selected @endif>Activo</option>
                         <option value="0" @if(!old('activo', $usuario->activo)) selected @endif>Inactivo</option>
                     </select>
+                    @if($usuario->fecha_baja)
+                        <div class="form-text text-warning">
+                            <i class="bi bi-info-circle"></i> Al activar, se limpiará la fecha de baja.
+                        </div>
+                    @endif
                 </div>
 
-                @if(!$usuario->guardia_id)
-                {{-- Empleado interno: planta derivada de sitec (no editable) --}}
+                @if(!$usuario->esGuardia())
+                {{-- Empleado interno --}}
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Tipo de Empleado</label>
                     <select name="tipo_empleado" class="form-select">
@@ -45,7 +64,6 @@
                     </select>
                 </div>
 
-                {{-- NUEVO: Planta read-only derivada de sitec --}}
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Planta base</label>
                     @php
@@ -69,7 +87,7 @@
                     <label class="form-label">Planta asignada</label>
                     <select name="planta_id" class="form-select" required>
                         @foreach($plantas as $p)
-                            <option value="{{ $p->id }}" @if(old('planta_id', $plantaActual)==$p->id) selected @endif>{{ $p->nombre }}</option>
+                            <option value="{{ $p->id_planta }}" @if(old('planta_id', $plantaActual)==$p->id_planta) selected @endif>{{ $p->nombre }}</option>
                         @endforeach
                     </select>
                 </div>
@@ -78,7 +96,7 @@
                 <div class="col-12 mb-3">
                     <label class="form-label">Restablecer contraseña</label>
                     <input type="password" name="password" class="form-control" minlength="8" value="{{ old('password') }}">
-                    <div class="form-text">Dejar en blanco para mantener la contraseña actual. Si la cambia, mínimo 8 caracteres con mayúsculas, minúsculas, números y símbolos.</div>
+                    <div class="form-text">Dejar en blanco para mantener la contraseña actual. Mínimo 8 caracteres.</div>
                 </div>
             </div>
         </div>

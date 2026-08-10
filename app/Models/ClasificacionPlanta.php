@@ -1,21 +1,15 @@
 <?php
 // app/Models/ClasificacionPlanta.php
 //
-// MODELO: ClasificacionPlanta
-// TABLA:  sca.clasificacion_planta
+// Mapa sitec.clasificaciones → planta.
+// Permite derivar la planta de un empleado automáticamente desde su
+// clasificación en sitec (NO se edita manualmente por empleado).
 //
-// PROPÓSITO:
-//   Mapea cada id_clasificacion de sitec a una planta de sca.
-//   Es el puente que permite DERIVAR la planta del empleado:
-//
-//     sitec.empleados.id_clasificacion
-//       → sca.clasificacion_planta.id_clasificacion  (esta tabla)
-//       → sca.clasificacion_planta.planta_id
-//       → sca.plantas.id
-//
-//   El admin configura este mapeo una sola vez en /clasificaciones.
-//   NOTA: CORPORATIV (id=3) NO se mapea — los corporativos acceden
-//   por tipo_empleado (RN-01), no por planta física.
+// CAMBIOS V4:
+//   - 'clasificacion_sitec' (string) → 'id_clasificacion' (int, FK lógica)
+//     + 'nombre_clasificacion' (string, denormalizado por seguridad).
+//   - PK: id_clasificacion (no autoincrement; viene de sitec).
+//   - 'planta_id' → 'id_planta'.
 
 namespace App\Models;
 
@@ -24,26 +18,14 @@ use Illuminate\Database\Eloquent\Model;
 class ClasificacionPlanta extends Model
 {
     protected $table = 'clasificacion_planta';
-
-    // La PK es id_clasificacion (no 'id'), y no es auto-incremental
-    // porque el valor viene de sitec.clasificaciones.
     protected $primaryKey = 'id_clasificacion';
     public $incrementing = false;
     protected $keyType = 'int';
 
-    protected $fillable = [
-        'id_clasificacion',
-        'nombre_clasificacion',
-        'planta_id',
-    ];
+    protected $fillable = ['id_clasificacion', 'nombre_clasificacion', 'id_planta'];
 
-    public $timestamps = true;
-
-    /**
-     * Planta de sca a la que mapea esta clasificación.
-     */
     public function planta()
     {
-        return $this->belongsTo(Planta::class, 'planta_id');
+        return $this->belongsTo(Planta::class, 'id_planta', 'id_planta');
     }
 }

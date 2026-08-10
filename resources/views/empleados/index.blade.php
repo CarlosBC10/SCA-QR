@@ -1,4 +1,9 @@
 {{-- resources/views/empleados/index.blade.php --}}
+{{--
+    CAMBIOS V4:
+      - Filtro planta: id → id_planta.
+      - El resto no cambia (usa accesores de Sitec\Empleado que siguen funcionando).
+--}}
 @extends('layouts.app')
 
 @section('title', 'Gestión de Empleados')
@@ -23,7 +28,7 @@
                 <select name="planta" class="form-select">
                     <option value="">Todas / Sin asignar</option>
                     @foreach($plantas as $p)
-                        <option value="{{ $p->id }}" @if(request('planta')==$p->id) selected @endif>{{ $p->nombre }}</option>
+                        <option value="{{ $p->id_planta }}" @if(request('planta')==$p->id_planta) selected @endif>{{ $p->nombre }}</option>
                     @endforeach
                 </select>
             </div>
@@ -53,30 +58,23 @@
             </thead>
             <tbody>
                 @forelse($empleados as $e)
-                @php
-                    $plantaDerivada = $e->plantaId();
-                    $plantaNombre = $e->plantaNombre();
-                    $turno = $e->turno;
-                @endphp
                 <tr>
                     <td class="font-monospace">{{ $e->id_empleado }}</td>
                     <td class="fw-semibold">{{ $e->nombre_completo }}</td>
                     <td>{{ $e->puesto?->nombre ?? '—' }}</td>
                     <td>{{ $e->departamento?->nombre ?? '—' }}</td>
                     <td>
-                        @if($turno)
-                            <span class="badge bg-light text-dark border" title="{{ $turno->entrada }} - {{ $turno->salida }}">
-                                <i class="bi bi-clock"></i> {{ $turno->nombre }}
+                        @if($e->turno)
+                            <span class="badge bg-light text-dark border" title="{{ $e->turno->entrada }} - {{ $e->turno->salida }}">
+                                <i class="bi bi-clock"></i> {{ $e->turno->nombre }}
                             </span>
-                            <div class="small text-muted">{{ $turno->entrada }} - {{ $turno->salida }}</div>
+                            <div class="small text-muted">{{ $e->turno->entrada }} - {{ $e->turno->salida }}</div>
                         @else
                             <span class="text-muted">—</span>
                         @endif
                     </td>
-                    
                     <td>
                         @php
-                            // OPTIMIZADO: usar valores precalculados en el controlador
                             $plantaDerivada = $e->plantaDerivadaId ?? null;
                             $plantaNombre = $e->plantaDerivadaNombre ?? 'Sin planta';
                         @endphp
@@ -86,7 +84,6 @@
                             <span class="badge bg-warning text-dark">Sin planta</span>
                         @endif
                     </td>
-
                     <td>
                         @if($e->ext?->tipo_empleado)
                             @php

@@ -100,10 +100,23 @@ class Empleado extends Model
 
     /**
      * OPTIMIZADO: usa caché del mapeo clasificacion→planta.
+     *
+     * FIX E: La planta ahora se lee directamente del campo físico 
+     * 'id_planta' en 'empleados_ext_sca'. Ya no se deriva en tiempo real 
+     * de la tabla de mapeo (eso era lento y causaba inconsistencias).
+     *
+     * La sincronización de la planta se realiza de forma automática al:
+     * 1. Mapear clasificaciones masivamente.
+     * 2. Editar al empleado manualmente.
+     * 3. Escanear al empleado (si se detecta que RH cambió su clasificación en sitec).
      */
     public function plantaId(): ?int
     {
-        return \App\Services\PlantaCacheService::plantaDeClasificacion($this->id_clasificacion);
+        // Simplemente leemos el valor guardado en ext_sca.
+        // Si es NULL, significa que el empleado aún no ha sido configurado 
+        // (su clasificación no está mapeada y el admin no le ha asignado una).
+        $ext = $this->extRecord();
+        return $ext && $ext->id_planta !== null ? (int) $ext->id_planta : null;
     }
 
     /**

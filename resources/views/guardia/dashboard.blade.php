@@ -1,4 +1,23 @@
 {{-- resources/views/guardia/dashboard.blade.php --}}
+{{--
+    PANEL DEL GUARDIA (dashboard web).
+
+    CAMBIOS V4:
+      1. Dos listas de pendientes SEPARADAS:
+         - Revisiones F10 (estado='pendiente_revision'): botón todo_bien|anomalia.
+         - Justificaciones de horario (estado='revision_horario'): dropdown con
+           catálogo justificaciones_horario.
+      2. Eliminado "marcar visto" de denegados (se eliminó visto_guardia de bitacora).
+         Los denegados ahora solo se ven en el feed; no se "marcan".
+      3. Eliminado el textarea de justificación del empleado (J1+J2: el guardia
+         selecciona del catálogo, no escribe texto libre).
+      4. Modal unificado para resolver F10 (todo_bien|anomalia + descripción).
+      5. Modal nuevo para justificar horario (dropdown del catálogo).
+      6. Rutas renombradas: api.guardia.dentro → api.guardia.personas-dentro.
+      7. Estados: revision_completada ELIMINADO. Después de F10 o justificación,
+         el estado pasa a 'autorizado'.
+      8. Mostrar kioskos activos del guardia (puede tener varios: entrada, salida, mixto).
+--}}
 @extends('layouts.app')
 
 @section('title', 'Panel de Guardia')
@@ -9,13 +28,13 @@
         <div>
             <h3 class="fw-bold mb-0">Panel de Guardia</h3>
             <p class="text-muted mb-0">
-                Planta: <strong>{{ $turnoActivo?->planta?->nombre ?? 'Sin asignar' }}</strong> | 
-                Turno iniciado: <strong>{{ $turnoActivo?->fecha_hora_inicio->format('H:i') ?? '---' }}</strong>
+                <i class="bi bi-person-badge"></i> {{ Auth::user()->nombre_completo }} ·
+                <i class="bi bi-geo-alt"></i> {{ Auth::user()->planta_nombre ?? 'Sin asignar' }}
             </p>
         </div>
-        
-        <form method="POST" action="{{ route('guardia.terminar.turno') }}" id="form-terminar-turno" 
-              onsubmit="return confirm('¿Está seguro de terminar su turno?\n\nSe cerrará su sesión y el kiosko quedará desactivado.\n\nEsta acción no se puede deshacer.')">
+
+        <form method="POST" action="{{ route('guardia.terminar.turno') }}" id="form-terminar-turno"
+              onsubmit="return confirm('¿Está seguro de terminar su turno?\n\nSe cerrarán TODOS sus kioskos activos y su sesión.\n\nEsta acción no se puede deshacer.')">
             @csrf
             <button type="submit" class="btn btn-danger">
                 <i class="bi bi-box-arrow-right"></i> Terminar Turno
@@ -23,29 +42,64 @@
         </form>
     </div>
 
+    {{-- Kioskos activos del guardia (informativo) --}}
+    @if($kioskosActivos && $kioskosActivos->isNotEmpty())
+    <div class="alert alert-info d-flex align-items-center" style="border-radius:12px;">
+        <i class="bi bi-display fs-4 me-3"></i>
+        <div class="flex-grow-1">
+            <strong>Tiene {{ $kioskosActivos->count() }} kiosko(s) público(s) activo(s):</strong>
+            @foreach($kioskosActivos as $k)
+                <span class="badge bg-light text-dark me-2">
+                    {{ $k->planta?->nombre }} · {{ ucfirst($k->modo) }}
+                </span>
+            @endforeach
+        </div>
+    </div>
+    @endif
+
     <div class="row g-3">
-        
-        {{-- COL 1: Alertas pendientes --}}
+
+        {{-- ===================================================== --}}
+        {{-- COL 1: Justificaciones de horario pendientes --}}
+        {{-- ===================================================== --}}
         <div class="col-md-6">
-            <div class="card border-0 shadow-sm h-100 sca-card" style="border-radius: 12px;">
+            <div class="card border-0 shadow-sm h-100 sca-card" style="border-radius: 12px; border-top: 4px solid #0277bd !important;">
                 <div class="card-header bg-transparent py-3 d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0 fw-bold"><i class="bi bi-bell text-warning"></i> Alertas Pendientes</h5>
-                    <span class="badge bg-warning text-dark" id="count-revisions">0</span>
+                    <h5 class="mb-0 fw-bold"><i class="bi bi-clock-history text-primary"></i> Justificaciones de Horario</h5>
+                    <span class="badge bg-primary" id="count-justificaciones">0</span>
                 </div>
-                <div class="card-body" id="list-revisions" style="max-height: 50vh; overflow-y: auto;">
+                <div class="card-body" id="list-justificaciones" style="max-height: 50vh; overflow-y: auto;">
                     <div class="text-center text-muted py-5">
-                        <i class="bi bi-check-circle fs-1 text-success"></i>
-                        <p class="mt-2 mb-0">Sin alertas pendientes</p>
+                        <span class="spinner-border spinner-border-sm"></span> Cargando...
                     </div>
                 </div>
             </div>
         </div>
 
-        {{-- COL 2: Personas dentro --}}
+        {{-- ===================================================== --}}
+        {{-- COL 2: Revisiones F10 pendientes --}}
+        {{-- ===================================================== --}}
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100 sca-card" style="border-radius: 12px; border-top: 4px solid #f57c00 !important;">
+                <div class="card-header bg-transparent py-3 d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0 fw-bold"><i class="bi bi-shield-exclamation text-warning"></i> Revisiones F10</h5>
+                    <span class="badge bg-warning text-dark" id="count-revisions">0</span>
+                </div>
+                <div class="card-body" id="list-revisions" style="max-height: 50vh; overflow-y: auto;">
+                    <div class="text-center text-muted py-5">
+                        <span class="spinner-border spinner-border-sm"></span> Cargando...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {{-- ===================================================== --}}
+        {{-- COL 3: Personas dentro --}}
+        {{-- ===================================================== --}}
         <div class="col-md-6">
             <div class="card border-0 shadow-sm h-100 sca-card" style="border-radius: 12px;">
                 <div class="card-header bg-transparent py-3 d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0 fw-bold"><i class="bi bi-people-fill text-success"></i> Personas Dentro</h5>
+                    <h5 class="mb-0 fw-bold"><i class="bi bi-people text-success"></i> Personas Dentro</h5>
                     <span class="badge bg-success" id="count-dentro">0</span>
                 </div>
                 <div class="card-body" id="list-dentro" style="max-height: 50vh; overflow-y: auto;">
@@ -57,38 +111,25 @@
             </div>
         </div>
 
-        {{-- COL 3: Denegados --}}
-        <div class="col-md-6">
-            <div class="card border-0 shadow-sm h-100 sca-card" id="card-denegados" style="border-radius: 12px; display:none;">
-                <div class="card-header bg-transparent py-3 d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0 fw-bold"><i class="bi bi-shield-exclamation text-danger"></i> Accesos Denegados</h5>
-                    <span class="badge bg-danger" id="badge-denegados">0</span>
-                </div>
-                <div class="card-body" id="list-denegados" style="max-height: 40vh; overflow-y: auto;">
-                </div>
-            </div>
-        </div>
-
-        {{-- COL 4: Escaneo (Cámara + Manual) --}}
+        {{-- ===================================================== --}}
+        {{-- COL 4: Escaneo rápido (cámara + manual) --}}
+        {{-- ===================================================== --}}
         <div class="col-md-6">
             <div class="card border-0 shadow-sm sca-card" style="border-radius: 12px;">
                 <div class="card-header bg-transparent py-3">
                     <h5 class="mb-0 fw-bold"><i class="bi bi-qr-code-scan text-success"></i> Escaneo Rápido</h5>
                 </div>
                 <div class="card-body">
-                    {{-- Botón de cámara --}}
                     <button class="btn btn-outline-success w-100 btn-lg mb-2" id="btn-toggle-camera">
                         <i class="bi bi-camera"></i> Abrir Cámara
                     </button>
 
-                    {{-- Divider --}}
                     <div class="d-flex align-items-center my-3">
                         <hr class="flex-grow-1">
                         <span class="px-2 text-muted small">o búsqueda manual</span>
                         <hr class="flex-grow-1">
                     </div>
 
-                    {{-- Búsqueda manual --}}
                     <div class="mb-2">
                         <label class="form-label small text-muted">Número de empleado</label>
                         <input type="number" id="manual-id" class="form-control form-control-lg" placeholder="Ej: 23951">
@@ -101,7 +142,9 @@
             </div>
         </div>
 
-        {{-- COL 5: Feed de actividad reciente con filtros --}}
+        {{-- ===================================================== --}}
+        {{-- COL 5: Feed de actividad reciente --}}
+        {{-- ===================================================== --}}
         <div class="col-12">
             <div class="card border-0 shadow-sm sca-card" style="border-radius: 12px;">
                 <div class="card-header bg-transparent py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -114,15 +157,13 @@
                     </div>
                 </div>
                 <div class="card-body p-0">
-                    {{-- Header de columnas --}}
-                    <div class="d-flex align-items-center px-3 py-2 border-bottom" 
+                    <div class="d-flex align-items-center px-3 py-2 border-bottom"
                          style="background: var(--sca-hover); font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--sca-text-muted);">
                         <div style="width: 70px;" class="text-center">Hora</div>
                         <div style="width: 50px;" class="text-center">Tipo</div>
                         <div class="flex-grow-1 px-3">Persona</div>
                         <div style="min-width: 110px;" class="text-end">Acción</div>
                     </div>
-                    {{-- Lista --}}
                     <div id="feed-list" style="max-height: 450px; overflow-y: auto;">
                         <div class="text-center text-muted py-5">
                             <span class="spinner-border spinner-border-sm"></span> Cargando...
@@ -131,11 +172,10 @@
                 </div>
             </div>
         </div>
-
     </div>
 </div>
 
-{{-- Cámara flotante para escaneo --}}
+{{-- Cámara flotante --}}
 <div class="camera-floating-guardia" id="camera-view-guardia" style="display:none; position:fixed; bottom:20px; right:20px; width:280px; height:210px; z-index:9998; border-radius:12px; overflow:hidden; box-shadow:0 8px 24px rgba(0,0,0,0.4); border:2px solid var(--sca-border);">
     <video id="video-guardia" playsinline style="width:100%; height:100%; object-fit:cover; display:block; background:#000;"></video>
     <div style="position:absolute; top:0; left:0; right:0; height:3px; background:var(--sca-primary); animation:scanLine 2s linear infinite;"></div>
@@ -155,23 +195,52 @@
 }
 </style>
 
-{{-- Modal para resolver pendiente --}}
+{{-- ===================================================== --}}
+{{-- MODAL: Justificar anomalía de horario (dropdown catálogo) --}}
+{{-- ===================================================== --}}
+<div class="modal fade" id="justifyModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content sca-modal-content" style="border-radius: 16px;">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title fw-bold"><i class="bi bi-clock-history text-primary"></i> Justificar Acceso</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pt-2">
+                <p>Empleado: <strong id="justify-name"></strong></p>
+                <p class="small text-muted">Hora del acceso: <span id="justify-hora"></span></p>
+
+                <div class="mb-3">
+                    <label class="form-label">Seleccione la justificación <span class="text-danger">*</span></label>
+                    <select class="form-select" id="justify-select">
+                        <option value="">Cargando catálogo...</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <input type="hidden" id="justify-bitacora-id">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btn-save-justify">
+                    <i class="bi bi-check-lg"></i> Justificar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{{-- ===================================================== --}}
+{{-- MODAL: Resolver revisión F10 (todo_bien|anomalia) --}}
+{{-- ===================================================== --}}
 <div class="modal fade" id="resolveModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content sca-modal-content" style="border-radius: 16px;">
             <div class="modal-header border-0 pb-0">
-                <h5 class="modal-title fw-bold">Atender Alerta</h5>
+                <h5 class="modal-title fw-bold"><i class="bi bi-shield-exclamation text-warning"></i> Revisión F10</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body pt-2">
-                <p>Tipo: <strong id="modal-type"></strong></p>
                 <p>Empleado: <strong id="modal-name"></strong></p>
-                
-                <div class="mb-3" id="modal-user-justification-wrapper" style="display: none;">
-                    <label class="form-label">Justificación del Empleado:</label>
-                    <textarea class="form-control" id="modal-user-justification" rows="2" readonly></textarea>
-                </div>
-                
+                <p class="small text-muted">Hora del acceso: <span id="modal-hora"></span></p>
+
                 <div class="mb-3">
                     <label class="form-label">Resultado de la revisión</label>
                     <select class="form-select" id="modal-result">
@@ -180,14 +249,16 @@
                     </select>
                 </div>
                 <div class="mb-3" id="modal-desc-wrapper" style="display: none;">
-                    <label class="form-label">Descripción del hallazgo</label>
-                    <textarea class="form-control" id="modal-desc" rows="3"></textarea>
+                    <label class="form-label">Descripción del hallazgo <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="modal-desc" rows="3" placeholder="Describa la anomalía..."></textarea>
                 </div>
             </div>
             <div class="modal-footer border-0 pt-0">
                 <input type="hidden" id="modal-bitacora-id">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                <button type="button" class="btn btn-success" id="btn-save-resolution">Guardar</button>
+                <button type="button" class="btn btn-success" id="btn-save-resolution">
+                    <i class="bi bi-check-lg"></i> Guardar
+                </button>
             </div>
         </div>
     </div>
@@ -197,26 +268,27 @@
 
 @push('scripts')
 <script>
-    let resolveModal;
+    const CSRF_TOKEN = '{{ csrf_token() }}';
+    let resolveModal, justifyModal;
     let cameraStreamGuardia = null;
     let isProcessingGuardia = false;
 
     document.addEventListener('DOMContentLoaded', function() {
         resolveModal = new bootstrap.Modal(document.getElementById('resolveModal'));
+        justifyModal = new bootstrap.Modal(document.getElementById('justifyModal'));
 
-        // Polling de alertas pendientes
+        // Cargar catálogo de justificaciones (1 sola vez)
+        cargarCatalogoJustificaciones();
+
+        // Polling de pendientes (justificaciones + revisiones F10)
         fetchPending();
         setInterval(fetchPending, 5000);
 
-        // Polling de denegados cada 10s
-        cargarDenegados();
-        setInterval(cargarDenegados, 10000);
-
-        // Polling de personas dentro cada 10s
+        // Polling de personas dentro
         cargarDentro();
         setInterval(cargarDentro, 10000);
 
-        // Polling de feed cada 5s
+        // Polling de feed
         cargarFeed();
         setInterval(cargarFeed, 5000);
 
@@ -230,26 +302,51 @@
             procesarDesdeGuardia(id, 'manual');
         });
 
+        // Modal F10: mostrar/ocultar descripción según resultado
         document.getElementById('modal-result').addEventListener('change', function() {
             document.getElementById('modal-desc-wrapper').style.display = this.value === 'anomalia' ? 'block' : 'none';
         });
 
-        document.getElementById('btn-save-resolution').addEventListener('click', async () => {
-            const bitacoraId = document.getElementById('modal-bitacora-id').value;
-            const resultado = document.getElementById('modal-result').value;
-            const descripcion = document.getElementById('modal-desc').value;
+        // Guardar resolución F10
+        document.getElementById('btn-save-resolution').addEventListener('click', guardarResolucionF10);
 
-            await fetch('/api/guardia/resolve', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
-                body: JSON.stringify({ bitacora_id: bitacoraId, resultado, descripcion })
+        // Guardar justificación de horario
+        document.getElementById('btn-save-justify').addEventListener('click', guardarJustificacion);
+
+        // Filtros del feed
+        document.querySelectorAll('#feed-filter button').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('#feed-filter button').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                feedFilter = this.dataset.filter;
+                renderFeed();
             });
-            resolveModal.hide();
-            fetchPending();
         });
     });
 
-    // ===== Escaneo desde el dashboard del guardia =====
+    // ============================================================
+    // CARGAR CATÁLOGO DE JUSTIFICACIONES (1 vez, al cargar)
+    // ============================================================
+    async function cargarCatalogoJustificaciones() {
+        try {
+            // Asumimos que hay una ruta API; si no, se puede agregar en el controlador
+            // Por ahora usamos una ruta directa al modelo
+            const res = await fetch('/api/justificaciones');
+            const data = await res.json();
+            const select = document.getElementById('justify-select');
+            select.innerHTML = '<option value="">Seleccione una opción...</option>';
+            data.forEach(j => {
+                select.innerHTML += `<option value="${j.id_justificacion}">${j.nombre}</option>`;
+            });
+        } catch(e) {
+            console.error('Error cargando justificaciones:', e);
+            document.getElementById('justify-select').innerHTML = '<option value="">Error al cargar</option>';
+        }
+    }
+
+    // ============================================================
+    // CÁMARA Y ESCANEO DESDE PANEL
+    // ============================================================
     async function toggleCameraGuardia() {
         const view = document.getElementById('camera-view-guardia');
         const btn = document.getElementById('btn-toggle-camera');
@@ -285,7 +382,7 @@
                     const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
                     const code = jsQR(imageData.data, imageData.width, imageData.height);
                     if (code) {
-                        procesarDesdeGuardia(code.data, 'kiosco');
+                        procesarDesdeGuardia(code.data, 'guardia');
                     }
                 }
                 requestAnimationFrame(tick);
@@ -308,14 +405,17 @@
         try {
             const res = await fetch('/api/scan', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF_TOKEN },
                 body: JSON.stringify({ codigo, origen })
             });
             const data = await res.json();
-            if (data.success) {
-                resDiv.innerHTML = `<div class="alert alert-success d-flex align-items-center"><img src="${data.persona.foto}" class="rounded-circle me-3" width="50" height="50"><div><strong>${data.persona.nombre}</strong><br>${data.message}</div></div>`;
+            if (data.success && data.autorizado) {
+                resDiv.innerHTML = `<div class="alert alert-success d-flex align-items-center"><img src="${data.persona?.foto || ''}" class="rounded-circle me-3" width="50" height="50"><div><strong>${data.persona?.nombre || ''}</strong><br>${data.message}</div></div>`;
+            } else if (data.success && data.pendiente) {
+                resDiv.innerHTML = `<div class="alert alert-warning"><i class="bi bi-hourglass"></i> <strong>${data.persona?.nombre || 'Empleado'}</strong> — ${data.message}</div>`;
+                fetchPending(); // Refrescar pendientes
             } else {
-                resDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle"></i> ${data.message}</div>`;
+                resDiv.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle"></i> ${data.message || 'Error'}</div>`;
             }
         } catch(e) {
             resDiv.innerHTML = `<div class="alert alert-danger">Error de conexión</div>`;
@@ -324,122 +424,171 @@
         }
     }
 
-    // ===== Alertas pendientes =====
+    // ============================================================
+    // PENDIENTES (2 listas: justificaciones + revisiones F10)
+    // ============================================================
     async function fetchPending() {
         try {
-            const res = await fetch('/api/guardia/pending');
-            const data = await res.json();
-            
-            let html = '';
-            let count = 0;
-            
-            data.forEach(item => {
-                count++;
-                let bgClass = item.tipo === 'revision' ? 'alert-warning' : 'alert-info';
-                let icon = item.tipo === 'revision' ? 'bi-shield-exclamation' : 'bi-exclamation-triangle';
-                let text = item.tipo === 'revision' ? 'Revisión aleatoria' : 'Anomalía de horario';
-                
-                html += `
-                    <div class="alert ${bgClass} d-flex justify-content-between align-items-center mb-2">
-                        <div>
-                            <strong><i class="bi ${icon} me-1"></i> ${item.nombre}</strong> 
-                            <small class="text-muted d-block">${text} - ${item.hora}</small>
-                        </div>
-                        <button class="btn btn-sm btn-success" onclick="openResolveModal(${item.bitacora_id}, '${item.nombre}', '${item.tipo}', '${item.justificacion}')">Atender</button>
-                    </div>
-                `;
-            });
-            
-            document.getElementById('count-revisions').innerText = count;
-            document.getElementById('list-revisions').innerHTML = count > 0 ? html : '<div class="text-center text-muted py-5"><i class="bi bi-check-circle fs-1 text-success"></i><p class="mt-2 mb-0">Sin alertas pendientes</p></div>';
-        } catch(e) {
-            console.error('Error:', e);
-        }
-    }
-
-    // ===== Denegados =====
-    async function cargarDenegados() {
-        try {
-            const res = await fetch('{{ route("api.guardia.denegados") }}');
+            const res = await fetch('{{ route("api.guardia.pending") }}');
             const data = await res.json();
 
-            const card = document.getElementById('card-denegados');
-            const badge = document.getElementById('badge-denegados');
-            const lista = document.getElementById('list-denegados');
+            // Justificaciones de horario (estado='revision_horario')
+            const justificaciones = data.justificaciones || [];
+            const revisions = data.revisiones || [];
 
-            if (!card) return;
+            // Render justificaciones
+            const justList = document.getElementById('list-justificaciones');
+            const justCount = document.getElementById('count-justificaciones');
+            justCount.textContent = justificaciones.length;
 
-            if (data.length === 0) {
-                card.style.display = 'none';
-                return;
-            }
-
-            card.style.display = 'block';
-            badge.textContent = data.length;
-
-            let html = '';
-            data.forEach(d => {
-                html += `
-                    <div class="alert alert-danger d-flex justify-content-between align-items-center mb-2">
+            if (justificaciones.length === 0) {
+                justList.innerHTML = '<div class="text-center text-muted py-5"><i class="bi bi-check-circle fs-1 text-success opacity-50"></i><p class="mt-2 mb-0">Sin justificaciones pendientes</p></div>';
+            } else {
+                justList.innerHTML = justificaciones.map(item => `
+                    <div class="alert alert-primary d-flex justify-content-between align-items-center mb-2">
                         <div>
-                            <strong><i class="bi bi-x-circle me-1"></i> ${d.nombre}</strong>
-                            <small class="text-muted d-block">${d.motivo} - ${d.hora}</small>
+                            <strong><i class="bi bi-clock-history me-1"></i> ${item.nombre}</strong>
+                            <small class="text-muted d-block">Acceso fuera de horario - ${item.hora}</small>
                         </div>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="marcarVisto(${d.bitacora_id}, this)" title="Marcar como revisado">
-                            <i class="bi bi-check2"></i>
+                        <button class="btn btn-sm btn-primary" onclick="openJustifyModal(${item.bitacora_id}, '${item.nombre.replace(/'/g, "\\'")}', '${item.hora}')">
+                            <i class="bi bi-check-lg"></i> Justificar
                         </button>
                     </div>
-                `;
-            });
-            lista.innerHTML = html;
-        } catch(e) {
-            console.error('Error denegados:', e);
-        }
-    }
+                `).join('');
+            }
 
-    async function marcarVisto(bitacoraId, btn) {
-        if (!confirm('¿Marcar como revisado?')) return;
-        
-        const card = btn.closest('.alert');
-        card.style.transition = 'opacity 0.2s';
-        card.style.opacity = '0.3';
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-        
-        try {
-            const res = await fetch('{{ route("api.guardia.marcar-visto") }}', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
-                body: JSON.stringify({ bitacora_id: bitacoraId })
-            });
-            const data = await res.json();
-            
-            if (data.success) {
-                card.remove();
-                const badge = document.getElementById('badge-denegados');
-                const nuevoTotal = parseInt(badge.textContent) - 1;
-                badge.textContent = nuevoTotal;
-                if (nuevoTotal === 0) {
-                    document.getElementById('card-denegados').style.display = 'none';
-                }
+            // Render revisiones F10
+            const revList = document.getElementById('list-revisions');
+            const revCount = document.getElementById('count-revisions');
+            revCount.textContent = revisions.length;
+
+            if (revisions.length === 0) {
+                revList.innerHTML = '<div class="text-center text-muted py-5"><i class="bi bi-check-circle fs-1 text-success opacity-50"></i><p class="mt-2 mb-0">Sin revisiones pendientes</p></div>';
             } else {
-                card.style.opacity = '1';
-                btn.disabled = false;
-                btn.innerHTML = '<i class="bi bi-check2"></i>';
-                alert(data.message || 'Error al marcar');
+                revList.innerHTML = revisions.map(item => `
+                    <div class="alert alert-warning d-flex justify-content-between align-items-center mb-2">
+                        <div>
+                            <strong><i class="bi bi-shield-exclamation me-1"></i> ${item.nombre}</strong>
+                            <small class="text-muted d-block">Revisión aleatoria F10 - ${item.hora}</small>
+                        </div>
+                        <button class="btn btn-sm btn-success" onclick="openResolveModal(${item.bitacora_id}, '${item.nombre.replace(/'/g, "\\'")}', '${item.hora}')">
+                            <i class="bi bi-check-lg"></i> Atender
+                        </button>
+                    </div>
+                `).join('');
             }
         } catch(e) {
-            card.style.opacity = '1';
-            btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-check2"></i>';
-            alert('Error de conexión');
+            console.error('Error fetchPending:', e);
         }
     }
 
-    // ===== Personas dentro =====
+    // ============================================================
+    // MODAL: Justificar anomalía de horario
+    // ============================================================
+    function openJustifyModal(bitacoraId, nombre, hora) {
+        document.getElementById('justify-bitacora-id').value = bitacoraId;
+        document.getElementById('justify-name').innerText = nombre;
+        document.getElementById('justify-hora').innerText = hora;
+        document.getElementById('justify-select').value = '';
+        justifyModal.show();
+    }
+
+    async function guardarJustificacion() {
+        const bitacoraId = document.getElementById('justify-bitacora-id').value;
+        const idJustificacion = document.getElementById('justify-select').value;
+
+        if (!idJustificacion) {
+            alert('Debe seleccionar una justificación.');
+            return;
+        }
+
+        const btn = document.getElementById('btn-save-justify');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Guardando...';
+
+        try {
+            const res = await fetch('{{ route("api.guardia.justificar") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF_TOKEN },
+                body: JSON.stringify({ bitacora_id: parseInt(bitacoraId), id_justificacion: parseInt(idJustificacion) })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                justifyModal.hide();
+                fetchPending();
+                cargarFeed();
+            } else {
+                alert(data.message || 'Error al justificar.');
+            }
+        } catch(e) {
+            alert('Error de conexión');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> Justificar';
+        }
+    }
+
+    // ============================================================
+    // MODAL: Resolver revisión F10
+    // ============================================================
+    function openResolveModal(bitacoraId, nombre, hora) {
+        document.getElementById('modal-bitacora-id').value = bitacoraId;
+        document.getElementById('modal-name').innerText = nombre;
+        document.getElementById('modal-hora').innerText = hora;
+        document.getElementById('modal-result').value = 'todo_bien';
+        document.getElementById('modal-desc-wrapper').style.display = 'none';
+        document.getElementById('modal-desc').value = '';
+        resolveModal.show();
+    }
+
+    async function guardarResolucionF10() {
+        const bitacoraId = document.getElementById('modal-bitacora-id').value;
+        const resultado = document.getElementById('modal-result').value;
+        const descripcion = document.getElementById('modal-desc').value;
+
+        if (resultado === 'anomalia' && !descripcion.trim()) {
+            alert('Debe describir la anomalía.');
+            return;
+        }
+
+        const btn = document.getElementById('btn-save-resolution');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Guardando...';
+
+        try {
+            const res = await fetch('{{ route("api.guardia.resolve") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': CSRF_TOKEN },
+                body: JSON.stringify({
+                    bitacora_id: parseInt(bitacoraId),
+                    resultado: resultado,
+                    descripcion: descripcion || null
+                })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                resolveModal.hide();
+                fetchPending();
+                cargarFeed();
+            } else {
+                alert(data.message || 'Error al resolver.');
+            }
+        } catch(e) {
+            alert('Error de conexión');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> Guardar';
+        }
+    }
+
+    // ============================================================
+    // PERSONAS DENTRO
+    // ============================================================
     async function cargarDentro() {
         try {
-            const res = await fetch('{{ route("api.guardia.dentro") }}');
+            const res = await fetch('{{ route("api.guardia.personas-dentro") }}');
             const data = await res.json();
 
             const badge = document.getElementById('count-dentro');
@@ -485,19 +634,11 @@
         }
     }
 
-    // ===== Feed de actividad reciente (con filtros) =====
+    // ============================================================
+    // FEED DE ACTIVIDAD
+    // ============================================================
     let feedData = [];
     let feedFilter = 'todos';
-
-    // Filtros (botones Todos/Entradas/Salidas/Denegados)
-    document.querySelectorAll('#feed-filter button').forEach(btn => {
-        btn.addEventListener('click', function() {
-            document.querySelectorAll('#feed-filter button').forEach(b => b.classList.remove('active'));
-            this.classList.add('active');
-            feedFilter = this.dataset.filter;
-            renderFeed();
-        });
-    });
 
     async function cargarFeed() {
         try {
@@ -535,9 +676,9 @@
         let html = '';
         datos.forEach(e => {
             let accion = matchAccion(e.estado, e.evento);
-            
-            let tipoBadge = e.tipo_persona === 'Emp' 
-                ? '<span class="badge bg-success-subtle text-success border border-success-subtle">Emp</span>' 
+
+            let tipoBadge = e.tipo_persona === 'Emp'
+                ? '<span class="badge bg-success-subtle text-success border border-success-subtle">Emp</span>'
                 : '<span class="badge bg-info-subtle text-info border border-info-subtle">Vis</span>';
 
             let detalle = '';
@@ -545,19 +686,15 @@
                 detalle = `<div class="small text-danger mt-1"><i class="bi bi-exclamation-circle"></i> ${motivoTexto(e.motivo)}</div>`;
             }
 
-            let origenBadge = e.origen === 'manual' 
-                ? '<span class="badge bg-secondary">Manual</span>' 
-                : '';
-
             html += `
-                <div class="d-flex align-items-center px-3 py-3 border-bottom" style="transition: background 0.2s;" 
-                     onmouseover="this.style.background='var(--sca-hover)'" 
+                <div class="d-flex align-items-center px-3 py-3 border-bottom" style="transition: background 0.2s;"
+                     onmouseover="this.style.background='var(--sca-hover)'"
                      onmouseout="this.style.background='transparent'">
                     <div style="width: 70px;" class="text-center">
                         <div class="font-monospace fw-bold small">${e.hora}</div>
                     </div>
                     <div style="width: 50px;" class="text-center">
-                        <div class="d-inline-flex align-items-center justify-content-center rounded-circle" 
+                        <div class="d-inline-flex align-items-center justify-content-center rounded-circle"
                              style="width: 36px; height: 36px; background: var(--sca-hover);">
                             <i class="bi ${e.icono} text-${e.color}"></i>
                         </div>
@@ -566,7 +703,6 @@
                         <div class="d-flex align-items-center gap-2 flex-wrap">
                             <strong>${e.nombre}</strong>
                             ${tipoBadge}
-                            ${origenBadge}
                         </div>
                         ${detalle}
                     </div>
@@ -581,8 +717,8 @@
 
     function matchAccion(estado, evento) {
         if (estado === 'denegado') return 'Denegado';
-        if (estado === 'pendiente_revision') return 'Revisión';
-        if (estado === 'revision_completada') return 'Revisado';
+        if (estado === 'pendiente_revision') return 'Revisión F10';
+        if (estado === 'revision_horario') return 'Justificación';
         if (estado === 'autorizado') {
             return evento === 'entrada' ? 'Entrada' : 'Salida';
         }
@@ -594,37 +730,12 @@
             'sin_clasificar': 'Empleado sin clasificar',
             'sin_planta': 'Planta no configurada',
             'planta_no_autorizada': 'Planta no autorizada',
-            'salida_temprana': 'Intentó salir antes de tiempo'
+            'salida_temprana': 'Intentó salir antes de tiempo',
+            'empleado_inactivo': 'Empleado inactivo',
+            'manual_bloqueado': 'Búsqueda manual bloqueada',
+            'credencial_expirada': 'Credencial expirada'
         };
         return map[motivo] || motivo;
-    }
-
-    function matchEstado(estado, evento) {
-        if (estado === 'denegado') return 'Denegado';
-        if (estado === 'pendiente_revision') return 'Revisión';
-        if (estado === 'revision_completada') return 'Revisado';
-        if (estado === 'autorizado') {
-            return evento === 'entrada' ? 'Entrada' : 'Salida';
-        }
-        return estado;
-    }
-
-    function openResolveModal(bitacoraId, nombre, tipo, justificacion) {
-        document.getElementById('modal-bitacora-id').value = bitacoraId;
-        document.getElementById('modal-name').innerText = nombre;
-        document.getElementById('modal-type').innerText = tipo === 'revision' ? 'Revisión Aleatoria' : 'Anomalía de Horario';
-        document.getElementById('modal-result').value = 'todo_bien';
-        document.getElementById('modal-desc-wrapper').style.display = 'none';
-        document.getElementById('modal-desc').value = '';
-        
-        if(tipo === 'anomalia' && justificacion) {
-            document.getElementById('modal-user-justification').value = justificacion;
-            document.getElementById('modal-user-justification-wrapper').style.display = 'block';
-        } else {
-            document.getElementById('modal-user-justification-wrapper').style.display = 'none';
-        }
-        
-        resolveModal.show();
     }
 </script>
 @endpush

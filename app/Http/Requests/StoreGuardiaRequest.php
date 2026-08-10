@@ -1,9 +1,12 @@
 <?php
 // app/Http/Requests/StoreGuardiaRequest.php
 //
-// Valida el alta de un usuario GUARDIA EXTERNO.
-// Los guardias NO están en sitec.empleados; tienen su propia tabla (RN-09).
-// El username se arma como 'G-' + numero_guardia (5 dígitos).
+// Validación para el alta de un usuario GUARDIA EXTERNO.
+//
+// CAMBIO V5:
+//   - Se elimina 'numero_guardia'.
+//   - Se agrega 'id_guardia' como campo principal (ej: "G-0001").
+//   - Este ID será su usuario para iniciar sesión.
 
 namespace App\Http\Requests;
 
@@ -17,23 +20,29 @@ class StoreGuardiaRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'nombre_completo' => ['required', 'string', 'max:200'],
-            'numero_guardia'  => ['required', 'string', 'size:5', 'regex:/^[0-9]+$/'],
-            'planta_id'       => ['required', 'integer', 'exists:plantas,id'],
-            'password'        => ['required', 'string', Password::min(8)->mixedCase()->numbers()->symbols()],
+            // Validamos que el ID tenga el formato correcto y sea único en la tabla guardias
+            'id_guardia'       => ['required', 'string', 'max:30', 'unique:guardias,id_guardia', 'regex:/^G-\d{4,5}$/'],
+            'email_emp'        => ['required', 'email', 'max:100'], // FIX I-10: Correo institucional obligatorio
+            'nombre_completo'  => ['required', 'string', 'max:200'],
+            'curp'             => ['nullable', 'string', 'size:18', 'regex:/^[A-Z0-9]+$/i', 'unique:guardias,curp'],
+            'id_planta'        => ['required', 'integer', 'exists:plantas,id_planta'],
+            'password' => ['nullable', 'string', Password::min(8)->mixedCase()->numbers()->symbols()],
         ];
     }
 
     public function messages(): array
     {
         return [
-            'nombre_completo.required' => 'El nombre del guardia es obligatorio.',
-            'numero_guardia.required'  => 'El número de guardia es obligatorio.',
-            'numero_guardia.size'      => 'El número de guardia debe tener exactamente 5 dígitos.',
-            'numero_guardia.regex'     => 'El número de guardia solo debe contener números.',
-            'planta_id.required'       => 'Debe seleccionar una planta.',
-            'planta_id.exists'         => 'La planta seleccionada no es válida.',
-            'password.required'        => 'La contraseña es obligatoria.',
+            'id_guardia.required'       => 'El usuario del guardia es obligatorio.',
+            'id_guardia.regex'          => 'El formato debe ser G- seguido de 4 o 5 dígitos (ej: G-0001).',
+            'id_guardia.unique'         => 'Ya existe un guardia con ese usuario.',
+            'nombre_completo.required'  => 'El nombre del guardia es obligatorio.',
+            'curp.size'                 => 'La CURP debe tener exactamente 18 caracteres.',
+            'curp.regex'                => 'La CURP solo debe contener letras y números.',
+            'curp.unique'               => 'Ya existe un guardia con esa CURP.',
+            'id_planta.required'        => 'Debe seleccionar una planta.',
+            'id_planta.exists'          => 'La planta seleccionada no es válida.',
+            'password.required'         => 'La contraseña es obligatoria.',
         ];
     }
 }

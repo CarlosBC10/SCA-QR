@@ -4,8 +4,10 @@
 // Valida la edición de un usuario existente.
 // El password es OPCIONAL: si viene vacío, no se cambia.
 //
-// CAMBIO: planta_id ahora es NULLABLE — solo aplica a guardias.
-// Para empleados se ignora (la planta se deriva de sitec).
+// CAMBIOS V4:
+//   - exists:roles_sca,id → exists:roles_sca,id_rol.
+//   - exists:plantas,id → exists:plantas,id_planta.
+//   - 'activo' sigue siendo boolean (lo maneja el controlador via fecha_baja).
 
 namespace App\Http\Requests;
 
@@ -20,12 +22,12 @@ class UpdateUsuarioRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'id_rol'        => ['required', 'integer', 'exists:roles_sca,id'],
+            'id_rol'        => ['required', 'integer', 'exists:roles_sca,id_rol'],
             'tipo_empleado' => ['nullable', Rule::in(['operativo', 'administrativo', 'corporativo'])],
             'activo'        => ['required', 'boolean'],
             'password'      => ['nullable', 'string', Password::min(8)->mixedCase()->numbers()->symbols()],
-            // planta_id solo aplica a guardias; se valida en el controlador
-            'planta_id'     => ['nullable', 'integer', 'exists:plantas,id'],
+            // id_planta solo aplica a guardias; se valida en el controlador
+            'planta_id'     => ['nullable', 'integer', 'exists:plantas,id_planta'],
         ];
     }
 

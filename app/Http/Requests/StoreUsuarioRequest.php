@@ -3,10 +3,9 @@
 //
 // Valida el alta de un usuario EMPLEADO INTERNO (login web).
 //
-// CAMBIO: planta_id ya NO se valida ni se asigna. La planta del
-// empleado se deriva de sitec (id_clasificacion → clasificacion_planta).
-// La regla RN-01 (corporativo accede a cualquier planta) se implementa
-// con tipo_empleado='corporativo' en la lógica del escáner (M3).
+// CAMBIOS V4:
+//   - exists:roles_sca,id → exists:roles_sca,id_rol (PK renombrada).
+//   - planta_id eliminado (se deriva de sitec, ya estaba así).
 
 namespace App\Http\Requests;
 
@@ -22,10 +21,10 @@ class StoreUsuarioRequest extends FormRequest
     {
         return [
             'id_empleado'   => ['required', 'integer', 'min:1'],
-            'password'      => ['required', 'string', Password::min(8)->mixedCase()->numbers()->symbols()],
-            'id_rol'        => ['required', 'integer', 'exists:roles_sca,id'],
+            'email_emp'     => ['required', 'email', 'max:100'], // FIX I-10: Correo institucional obligatorio
+            'password'      => ['nullable', 'string', Password::min(8)->mixedCase()->numbers()->symbols()],
+            'id_rol'        => ['required', 'integer', 'exists:roles_sca,id_rol'],
             'tipo_empleado' => ['required', Rule::in(['operativo', 'administrativo', 'corporativo'])],
-            // ELIMINADO: 'planta_id' — se deriva de sitec
         ];
     }
 
