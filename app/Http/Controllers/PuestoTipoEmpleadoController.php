@@ -1,12 +1,5 @@
 <?php
 // app/Http/Controllers/PuestoTipoEmpleadoController.php
-//
-// Controlador de clasificación de puestos (M2).
-// Permite clasificar cada puesto de sitec en operativo, administrativo
-// o corporativo. Al clasificar, se actualizan todos los empleados con
-// ese puesto (con aviso previo de cuántos son).
-//
-// ACCESO: Superadmin, Admin, Aprobador (los 3 pueden clasificar puestos).
 
 namespace App\Http\Controllers;
 
@@ -19,20 +12,11 @@ use Illuminate\Http\Request;
 class PuestoTipoEmpleadoController extends Controller
 {
     /**
-     * OPTIMIZADO: carga todos los conteos en 1 sola query agrupada.
-     * Antes hacía 192 AJAX (uno por puesto). Ahora hace 2 queries total.
+     * FIX J-1: Solo lista puestos con al menos 1 empleado activo (no vacíos).
      */
     public function index()
     {
-        // 1. Todos los puestos de sitec
-        $puestos = Puesto::orderBy('nombre')->get();
-
-        // 2. Clasificaciones actuales (mapeo id_puesto => tipo)
-        $clasificaciones = PuestoTipoEmpleado::pluck('tipo_empleado', 'id_puesto');
-
-        // 3. NUEVO: conteo de empleados por puesto en UNA sola query agrupada
-        // Antes: 192 AJAX × 1 query = 192 queries a sitec
-        // Ahora: 1 query agrupada
+        // 1. Conteo de empleados por puesto en UNA sola query agrupada
         $conteoEmpleados = \App\Models\Sitec\Empleado::on('sitec')
             ->selectRaw('id_puesto, COUNT(*) as total')
             ->where('estatus', 'Alta')
@@ -40,40 +24,91 @@ class PuestoTipoEmpleadoController extends Controller
             ->groupBy('id_puesto')
             ->pluck('total', 'id_puesto');
 
+        // FIX J-1: Solo puestos con al menos 1 empleado activo
+        $puestos = Puesto::whereIn('id_puesto', $conteoEmpleados->keys())
+            ->orderBy('nombre')
+            ->get();
+
+        // 2. Clasificaciones actuales (mapeo id_puesto => tipo)
+        $clasificaciones = PuestoTipoEmpleado::pluck('tipo_empleado', 'id_puesto');
+
         return view('puestos.index', compact('puestos', 'clasificaciones', 'conteoEmpleados'));
     }
 
-    /**
-     * GUARDAR/ACTUALIZAR clasificación de un puesto.
-     * POST /puestos
-     */
     public function store(StorePuestoTipoRequest $request)
     {
         $idPuesto = $request->id_puesto;
         $nuevoTipo = $request->tipo_empleado;
-
-        // Reclasificar (transacción: actualiza puesto_tipo_empleado + empleados_ext_sca)
         $actualizados = PuestoTipoEmpleado::reclasificarPuesto($idPuesto, $nuevoTipo);
 
-        LogSistema::registrar(
-            'CLASIFICAR_PUESTO',
-            "Puesto {$idPuesto} clasificado como '{$nuevoTipo}'. {$actualizados} empleados actualizados."
-        );
+        LogSistema::registrar('CLASIFICAR_PUESTO', "Puesto {$idPuesto} clasificado como '{$nuevoTipo}'. {$actualizados} empleados actualizados.");
 
-        return redirect()->route('puestos.index')
-            ->with('success', "Puesto clasificado como '{$nuevoTipo}'. {$actualizados} empleados actualizados.");
+        return redirect()->route('puestos.index')->with('success', "Puesto clasificado como '{$nuevoTipo}'. {$actualizados} empleados actualizados.");
     }
 
     /**
-     * CONTAR empleados con un puesto (AJAX para el aviso previo).
-     * GET /puestos/contar?id_puesto=1
+     * FIX J-2: Clasificación masiva.
      */
+    public function clasificarMasivo(Request $request)
+    {
+        $request->validate([
+            'id_puestos'    => ['required', 'array', 'min:1'],
+            'id_puestos.*'  => ['integer'],
+            'tipo_empleado' => ['required', 'in:operativo,administrativo,corporativo'],
+        ]);
+
+        $idPuestos = $request->id_puestos;
+        $nuevoTipo = $request->tipo_empleado;
+        $totalActualizados = 0;
+        $procesados = 0;
+
+        foreach ($idPuestos as $idPuesto) {
+            $actualizados = PuestoTipoEmpleado::reclasificarPuesto($idPuesto, $nuevoTipo);
+            $totalActualizados += $actualizados;
+            $procesados++;
+        }
+
+        LogSistema::registrar('CLASIFICAR_PUESTOS_MASIVO', "Clasificación masiva: {$procesados} puestos → '{$nuevoTipo}'. {$totalActualizados} empleados actualizados.");
+
+        return redirect()->route('puestos.index')->with('success', "Se clasificaron {$procesados} puestos como '{$nuevoTipo}'. {$totalActualizados} empleados actualizados.");
+    }
+
+    /**
+     * FIX J-3: Lista los empleados que tienen un puesto específico.
+     */
+    public function empleadosDelPuesto(int $idPuesto)
+    {
+        $puesto = Puesto::find($idPuesto);
+        if (!$puesto) return response()->json(['error' => 'Puesto no encontrado'], 404);
+
+        $empleados = \App\Models\Sitec\Empleado::on('sitec')
+            ->where('id_puesto', $idPuesto)
+            ->where('estatus', 'Alta')
+            ->with(['departamento'])
+            ->orderBy('nombre_completo')
+            ->limit(200)
+            ->get()
+            ->map(function ($e) {
+                return [
+                    'id'           => $e->id_empleado,
+                    'nombre'       => $e->nombre_completo,
+                    'departamento' => $e->departamento?->nombre ?? '—',
+                    'planta'       => $e->plantaNombre(),
+                ];
+            });
+
+        return response()->json([
+            'puesto'    => $puesto->nombre,
+            'id_puesto' => $puesto->id_puesto,
+            'total'     => $empleados->count(),
+            'empleados' => $empleados,
+        ]);
+    }
+
     public function contar(Request $request)
     {
         $request->validate(['id_puesto' => 'required|integer']);
-
         $cantidad = PuestoTipoEmpleado::contarEmpleadosConPuesto($request->id_puesto);
-
         return response()->json(['cantidad' => $cantidad]);
     }
 }

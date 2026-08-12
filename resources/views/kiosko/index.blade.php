@@ -574,6 +574,10 @@
                 : data;
 
             currentBitacoraId = payload.bitacora_id;
+
+
+
+            
             mostrarResultado(payload);
         } catch (error) {
             console.error('Error en /api/scan:', error);

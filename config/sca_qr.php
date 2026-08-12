@@ -10,6 +10,6 @@ return [
     
     // Revisión aleatoria
     'exentos_revision' => [],
-    'probabilidad_revision' => 10,
+    'probabilidad_revision' => 100,
     'minutos_timeout_revision' => 5,
 ];

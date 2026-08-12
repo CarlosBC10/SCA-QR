@@ -1170,44 +1170,10 @@ class ScannerController extends Controller
      */
     private function validarContinuidadPlanta(string $personaId,string $tipoEvento,int $plantaId): ?string {
         // Buscar la última bitácora NO denegada (sin importar el día)
-        $ultima = Bitacora::where('persona_id', $personaId)
+        $ultima = Bitacora::where('persona_id', $personaId) //correccion quitar empleado_id de sitec, no se usa aqui, por que se usa en persona_id de emplados_ext_sca_
             ->noDenegados()
             ->latest('fecha_hora')
             ->first();
-
-        // FIX E: Detección automática de cambio de clasificación en sitec
-        // Si el empleado es automático (no forzado), verificamos si su 
-        // clasificación en sitec cambió desde la última vez.
-        if ($tipoPersona === 'empleado' && $empleadoId !== null) {
-            $empleadoSitec = \App\Models\Sitec\Empleado::with('clasificacion')->find($empleadoId);
-            $extSca = \App\Models\EmpleadoExtSca::find($empleadoId);
-
-            if ($empleadoSitec && $extSca && !$extSca->planta_forzada) {
-                $clasificacionActual = $empleadoSitec->id_clasificacion;
-                
-                // Comparamos la planta derivada actual de sitec con la que teníamos guardada en SCA
-                $plantaDerivadaActual = \App\Services\PlantaCacheService::plantaDeClasificacion($clasificacionActual);
-                
-                if ($plantaDerivadaActual !== null && $extSca->id_planta !== null && $plantaDerivadaActual !== $extSca->id_planta) {
-                    // ¡La clasificación cambió en sitec y la planta derivada es distinta!
-                    $plantaViejaNombre = \App\Services\PlantaCacheService::nombrePlanta($extSca->id_planta);
-                    $plantaNuevaNombre = \App\Services\PlantaCacheService::nombrePlanta($plantaDerivadaActual);
-                    $plantaIntentoNombre = \App\Services\PlantaCacheService::nombrePlanta($plantaId);
-                    
-                    // Actualizamos la planta en SCA automáticamente
-                    $extSca->update([
-                        'id_planta' => $plantaDerivadaActual,
-                        'planta_forzada' => false,
-                    ]);
-                    
-                    // Enviamos notificación a Aprobadores/Admins/Super
-                    $this->notificarCambioClasificacionSitec($empleadoSitec, $plantaViejaNombre, $plantaNuevaNombre, $plantaIntentoNombre);
-                    
-                    // Bloqueamos el acceso en la planta vieja
-                    return "Su planta ha sido actualizada a {$plantaNuevaNombre} debido a un cambio en su clasificación. Diríjase a esa planta.";
-                }
-            }
-        }
 
         // Sin bitácora previa → primera vez → permitido
         if (!$ultima) {

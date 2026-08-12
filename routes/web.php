@@ -175,6 +175,10 @@ Route::middleware(['auth', 'debe_cambiar_password'])->group(function () {
         Route::get('/puestos', [PuestoTipoEmpleadoController::class, 'index'])->name('puestos.index');
         Route::post('/puestos', [PuestoTipoEmpleadoController::class, 'store'])->name('puestos.store');
         Route::get('/puestos/contar', [PuestoTipoEmpleadoController::class, 'contar'])->name('puestos.contar');
+        
+        // FIX J: Rutas nuevas
+        Route::post('/puestos/clasificar-masivo', [PuestoTipoEmpleadoController::class, 'clasificarMasivo'])->name('puestos.clasificar.masivo');
+        Route::get('/puestos/{id_puesto}/empleados', [PuestoTipoEmpleadoController::class, 'empleadosDelPuesto'])->name('puestos.empleados');
     });
 
     // ------------------------------------------------------------

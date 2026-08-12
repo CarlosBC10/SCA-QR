@@ -367,20 +367,9 @@ class AccesoService
     {
         $ahora = Carbon::now();
 
-        // 1. ¿Tiene pase_salida aprobado y vigente?
-        $paseSalida = SolicitudInt::where('tipo', 'pase_salida')
-            ->where('estado', 'aprobado')
-            ->where('creador_empleado_id', $empleadoId)
-            ->where('fecha_inicio', '<=', $ahora)
-            ->where('fecha_fin', '>=', $ahora)
-            ->exists();
-
-        if ($paseSalida) return true;
-
-        // 2. ¿Tiene interplantas aprobado y vigente (individual o grupal)?
-        //    Nota: no filtra por planta destino porque cualquier interplantas
-        //    vigente le permite salir de su planta actual.
-        $interplantas = SolicitudInt::where('tipo', 'interplantas')
+        // FIX FASE 1: Buscar si el empleado es creador O está en la lista grupal
+        // para ambos tipos de permiso (pase_salida e interplantas).
+        return SolicitudInt::whereIn('tipo', ['pase_salida', 'interplantas'])
             ->whereIn('estado', ['aprobado', 'aprobado_parcial'])
             ->where('fecha_inicio', '<=', $ahora)
             ->where('fecha_fin', '>=', $ahora)
@@ -388,12 +377,10 @@ class AccesoService
                 $q->where('creador_empleado_id', $empleadoId)
                   ->orWhereHas('empleados', function ($q2) use ($empleadoId) {
                       $q2->where('empleado_id', $empleadoId)
-                         ->where('estado', 'aprobado');
+                           ->where('estado', 'aprobado');
                   });
             })
             ->exists();
-
-        return $interplantas;
     }
 
     // ============================================================
