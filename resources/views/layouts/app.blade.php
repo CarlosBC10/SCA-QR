@@ -462,17 +462,51 @@
                 
                 {{-- NUEVO: los guardias NO ven este botón (usan Terminar Turno en su dashboard) --}}
                 @if(!Auth::user()->isGuardia())
-                <form method="POST" action="{{ route('logout') }}">
-                    @csrf
-                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Cerrar sesión">
-                        <i class="bi bi-box-arrow-right"></i>
-                    </button>
-                </form>
+                {{-- FIX: Botón de logout que NO se anida en otros forms --}}
+                {{-- El form real está al final del <body> para evitar anidamiento --}}
+                <a href="#" onclick="event.preventDefault(); document.getElementById('logout-form-global').submit();"
+                   class="btn btn-sm btn-outline-danger" title="Cerrar sesión">
+                    <i class="bi bi-box-arrow-right"></i>
+                </a>
                 @endif
             </div>
         </header>
 
         <main class="content-wrapper">
+            {{-- ============================================================
+                M1 [ScaModal] — Lector del flash estructurado 'sca_modal'.
+                (MOVIDO FUERA de @auth para que funcione también en /login)
+
+                Dispara el modal automáticamente cuando un controller hace:
+                ->with('sca_modal', ['tipo'=>'success', 'titulo'=>'...', 'mensaje'=>'...'])
+
+                Antes este bloque estaba dentro de @auth, así que no se disparaba
+                en la pantalla de login (que es @guest). Ahora se dispara siempre.
+
+                M2 va a reemplazar todos los ->with('success'/'error') por ->with('sca_modal', ...).
+                M7 eliminará los lectores viejos (session('success'/'error')) de abajo.
+                ============================================================ --}}
+            @if (session('sca_modal'))
+                @php
+                    $scaModal = session('sca_modal');
+                @endphp
+                <script>
+                    document.addEventListener('DOMContentLoaded', function () {
+                        if (typeof window.ScaModal === 'undefined') {
+                            console.error('[ScaModal] sca-modal.js no cargó. Flash no mostrado:', {{ \Illuminate\Support\Js::from($scaModal) }});
+                            return;
+                        }
+                        const cfg = {{ \Illuminate\Support\Js::from($scaModal) }};
+                        if (typeof window.ScaModal[cfg.tipo] === 'function') {
+                            window.ScaModal[cfg.tipo](cfg.titulo, cfg.mensaje, { detalles: cfg.detalles || null });
+                        } else {
+                            console.error('[ScaModal] Tipo no reconocido:', cfg.tipo);
+                            window.ScaModal.info(cfg.titulo || 'Aviso', cfg.mensaje || '');
+                        }
+                    });
+                </script>
+            @endif
+
             @auth
                 @php
                     $puestosTotales = \App\Models\Sitec\Puesto::count();
@@ -492,21 +526,13 @@
                 @endif
             @endauth
 
-            @if (session('success'))
-                <div class="alert d-flex align-items-center mb-4 animate-fade-in-up" 
-                     style="border-radius: 12px; background: rgba(40, 167, 69, 0.12); color: #155724; border: 1px solid rgba(40, 167, 69, 0.2);">
-                    <i class="bi bi-check-circle-fill me-3 fs-4"></i>
-                    <div class="flex-grow-1">{{ session('success') }}</div>
-                </div>
-            @endif
+            {{-- M7: Los lectores de session('success'/'error') y $errors->any() se eliminaron
+                porque ahora todo se maneja con el flash 'sca_modal' de arriba. --}}
 
-            @if (session('error'))
-                <div class="alert d-flex align-items-center mb-4 animate-fade-in-up" 
-                     style="border-radius: 12px; background: rgba(220, 53, 69, 0.12); color: #721c24; border: 1px solid rgba(220, 53, 69, 0.2);">
-                    <i class="bi bi-exclamation-triangle-fill me-3 fs-4"></i>
-                    <div class="flex-grow-1">{{ session('error') }}</div>
-                </div>
-            @endif
+            {{-- M1 [ScaModal] — Lector sca_modal movido FUERA de @auth (ver arriba).
+                Los lectores viejos de session('success'/'error') siguen acá abajo
+                como fallback para los controllers que no se han migrado todavía
+                (se eliminarán en M7). --}}
 
             @yield('content')
         </main>
@@ -514,10 +540,51 @@
     @endauth
 
     @guest
+        {{-- M2 [ScaModal] — Lector sca_modal para páginas GUEST (login, reset, etc).
+            Duplicado del lector de arriba (que está dentro de @auth externo).
+            Necesario porque el @auth externo no se renderiza para guests. --}}
+        @if (session('sca_modal'))
+            @php
+                $scaModal = session('sca_modal');
+            @endphp
+            <script>
+                document.addEventListener('DOMContentLoaded', function () {
+                    if (typeof window.ScaModal === 'undefined') {
+                        console.error('[ScaModal] sca-modal.js no cargó. Flash no mostrado:', {{ \Illuminate\Support\Js::from($scaModal) }});
+                        return;
+                    }
+                    const cfg = {{ \Illuminate\Support\Js::from($scaModal) }};
+                    if (typeof window.ScaModal[cfg.tipo] === 'function') {
+                        window.ScaModal[cfg.tipo](cfg.titulo, cfg.mensaje, { detalles: cfg.detalles || null });
+                    } else {
+                        console.error('[ScaModal] Tipo no reconocido:', cfg.tipo);
+                        window.ScaModal.info(cfg.titulo || 'Aviso', cfg.mensaje || '');
+                    }
+                });
+            </script>
+        @endif
+
         @yield('content')
     @endguest
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    {{-- ============================================================
+        M1 [ScaModal] — Carga del wrapper JS del sistema de modales.
+        Se carga DESPUÉS de bootstrap.bundle.min.js porque depende de
+        bootstrap.Modal. Se carga ANTES del @stack('scripts') para
+        que cualquier script de vista pueda usar window.ScaModal.
+
+        EXCLUSIÓN: El kiosko (rutas kiosko.*) NO carga ScaModal porque
+        tiene su propio feedback visual (pantalla verde/roja grande).
+        ============================================================ --}}
+    @unless(request()->routeIs('kiosko.*'))
+        {{-- defer: el JS descarga en paralelo pero espera a que el DOM se parseé
+            completo antes de ejecutarse. Necesario porque #scaModal se incluye
+            más abajo (en partials._sca_modal) y el JS lo busca al inicializar. --}}
+        <script src="{{ asset('js/sca-modal.js') }}" defer></script>
+    @endunless
+
     <script>
         // ===== TOGGLE SIDEBAR (móvil) =====
         document.getElementById('sidebarToggle')?.addEventListener('click', () => {
@@ -541,35 +608,22 @@
     </script>
     @stack('scripts')
 
-    <script>
-        // ===== HANDLER GLOBAL DE ERRORES AJAX =====
-        window.addEventListener('unhandledrejection', function(event) {
-            console.error('Error de red no capturado:', event.reason);
-            
-            // Evitar mostrar errores de fetch abortados
-            if (event.reason && event.reason.name === 'AbortError') return;
-            
-            // Mostrar toast de error
-            mostrarErrorConexion();
-        });
+    {{-- FIX: Form de logout global, fuera de cualquier otro form para evitar anidamiento --}}
+    <form id="logout-form-global" method="POST" action="{{ route('logout') }}" style="display:none;">
+        @csrf
+    </form>
 
-        function mostrarErrorConexion() {
-            let toast = document.getElementById('toast-error-global');
-            if (!toast) {
-                toast = document.createElement('div');
-                toast.id = 'toast-error-global';
-                toast.style.cssText = 'position:fixed; top:20px; right:20px; z-index:99999; background:#dc3545; color:#fff; padding:12px 20px; border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.3); display:flex; align-items:center; gap:10px;';
-                toast.innerHTML = '<i class="bi bi-wifi-off"></i> <span>Error de conexión con el servidor</span>';
-                document.body.appendChild(toast);
-                
-                setTimeout(() => {
-                    toast.style.opacity = '0';
-                    toast.style.transition = 'opacity 0.3s';
-                    setTimeout(() => toast.remove(), 300);
-                }, 4000);
-            }
-        }
-    </script>
+    {{-- ============================================================
+        M1 [ScaModal] — Container HTML + CSS del sistema de modales.
+        Se incluye UNA sola vez por página, al final del body.
+
+        EXCLUSIÓN: El kiosko (rutas kiosko.*) NO incluye el container
+        porque no carga sca-modal.js (ver arriba) y tiene su propio
+        feedback visual.
+        ============================================================ --}}
+    @unless(request()->routeIs('kiosko.*'))
+        @include('partials._sca_modal')
+    @endunless
 
 </body>
 </html>

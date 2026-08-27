@@ -43,12 +43,32 @@ class PuestoTipoEmpleadoController extends Controller
 
         LogSistema::registrar('CLASIFICAR_PUESTO', "Puesto {$idPuesto} clasificado como '{$nuevoTipo}'. {$actualizados} empleados actualizados.");
 
-        return redirect()->route('puestos.index')->with('success', "Puesto clasificado como '{$nuevoTipo}'. {$actualizados} empleados actualizados.");
+        // M2 [ScaModal] — Construir mensaje detallado con tipo y total.
+        $tipoLabel = ucfirst($nuevoTipo);
+        $mensaje = "<div class='text-start'>";
+        $mensaje .= "<div class='mb-2'><strong>Puesto clasificado como:</strong> {$tipoLabel}</div>";
+        $mensaje .= "<div class='mb-2'><strong>Empleados actualizados:</strong> {$actualizados}</div>";
+        $mensaje .= "</div>";
+
+        // Option E: Setear flash en sesión ANTES de devolver JSON.
+        session()->flash('sca_modal', sca_modal_flash('success', 'Puesto clasificado', $mensaje));
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success'  => true,
+                'redirect' => route('puestos.index'),
+            ]);
+        }
+
+        return redirect()->route('puestos.index')->with(
+            'sca_modal',
+            sca_modal_flash('success', 'Puesto clasificado', $mensaje)
+        );
     }
 
     /**
      * FIX J-2: Clasificación masiva.
-     */
+    */
     public function clasificarMasivo(Request $request)
     {
         $request->validate([
@@ -70,8 +90,32 @@ class PuestoTipoEmpleadoController extends Controller
 
         LogSistema::registrar('CLASIFICAR_PUESTOS_MASIVO', "Clasificación masiva: {$procesados} puestos → '{$nuevoTipo}'. {$totalActualizados} empleados actualizados.");
 
-        return redirect()->route('puestos.index')->with('success', "Se clasificaron {$procesados} puestos como '{$nuevoTipo}'. {$totalActualizados} empleados actualizados.");
+        // M2 [ScaModal] — Construir mensaje detallado con resumen.
+        $tipoLabel = ucfirst($nuevoTipo);
+        $mensaje = "<div class='text-start'>";
+        $mensaje .= "<div class='mb-2'><strong>Tipo asignado:</strong> {$tipoLabel}</div>";
+        $mensaje .= "<hr class='my-2'>";
+        $mensaje .= "<div class='row text-center'>";
+        $mensaje .= "<div class='col-6'><div class='h5 mb-0 text-success'>{$procesados}</div><small class='text-muted'>Puestos clasificados</small></div>";
+        $mensaje .= "<div class='col-6'><div class='h5 mb-0 text-primary'>{$totalActualizados}</div><small class='text-muted'>Empleados actualizados</small></div>";
+        $mensaje .= "</div></div>";
+
+        // Option E: Setear flash en sesión ANTES de devolver JSON.
+        session()->flash('sca_modal', sca_modal_flash('success', 'Clasificación masiva completada', $mensaje));
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success'  => true,
+                'redirect' => route('puestos.index'),
+            ]);
+        }
+
+        return redirect()->route('puestos.index')->with(
+            'sca_modal',
+            sca_modal_flash('success', 'Clasificación masiva completada', $mensaje)
+        );
     }
+
 
     /**
      * FIX J-3: Lista los empleados que tienen un puesto específico.

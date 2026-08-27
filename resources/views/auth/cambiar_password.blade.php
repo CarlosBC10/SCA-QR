@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {{-- M2 [ScaModal] — Token CSRF para peticiones AJAX --}}
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>Cambiar Contraseña · SCA-QR</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
@@ -96,6 +98,35 @@
             </div>
 
             <div class="card-body px-4 px-md-4 pb-4">
+                {{-- M2 [ScaModal] — Lector del flash estructurado 'sca_modal'.
+                    Dispara el modal automáticamente cuando un controller hace:
+                    ->with('sca_modal', ['tipo'=>'warning', 'titulo'=>'...', 'mensaje'=>'...'])
+
+                    Este bloque es necesario porque cambiar_password.blade.php es standalone
+                    (no extiende layouts/app.blade.php), así que el lector del layout no aplica.
+
+                    Mantenemos el lector viejo session('warning') como fallback hasta M7. --}}
+                @if (session('sca_modal'))
+                    @php
+                        $scaModal = session('sca_modal');
+                    @endphp
+                    <script>
+                        document.addEventListener('DOMContentLoaded', function () {
+                            if (typeof window.ScaModal === 'undefined') {
+                                console.error('[ScaModal] sca-modal.js no cargó. Flash no mostrado:', {{ \Illuminate\Support\Js::from($scaModal) }});
+                                return;
+                            }
+                            const cfg = {{ \Illuminate\Support\Js::from($scaModal) }};
+                            if (typeof window.ScaModal[cfg.tipo] === 'function') {
+                                window.ScaModal[cfg.tipo](cfg.titulo, cfg.mensaje, { detalles: cfg.detalles || null });
+                            } else {
+                                window.ScaModal.info(cfg.titulo || 'Aviso', cfg.mensaje || '');
+                            }
+                        });
+                    </script>
+                @endif
+
+                {{-- Lector viejo (fallback, se eliminará en M7) --}}
                 @if(session('warning'))
                     <div class="alert alert-warning border-0 shadow-sm py-2" style="border-radius: 12px; font-size: 0.85rem;">
                         <i class="bi bi-exclamation-triangle-fill"></i> {{ session('warning') }}
@@ -155,7 +186,18 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    {{-- ============================================================
+        M2 [ScaModal] — Cargar ScaModal en esta página standalone.
+        Esta página NO extiende layouts/app.blade.php (tiene diseño
+        propio con fondo verde gradiente), así que cargamos sca-modal.js
+        y el partial manualmente.
+        ============================================================ --}}
+    <script src="{{ asset('js/sca-modal.js') }}" defer></script>
+    @include('partials._sca_modal')
+
     <script>
+        // ===== RELOJ (código existente, sin cambios) =====
         function actualizarReloj() {
             const ahora = new Date();
             const h = String(ahora.getHours()).padStart(2, '0');
@@ -173,6 +215,62 @@
             html.setAttribute('data-bs-theme', newTheme);
             document.getElementById('themeIcon').className = newTheme === 'dark' ? 'bi bi-sun' : 'bi bi-moon-stars';
         }
+
+        // ============================================================
+        // M2 [ScaModal] — Intercept form submit for AJAX flow (Option E)
+        //
+        // FLUJO:
+        //   1. Usuario completa form y clic en "Cambiar Contraseña"
+        //   2. JS intercepta el submit (e.preventDefault())
+        //   3. Muestra modal loading ("Cambiando contraseña...")
+        //   4. Hace fetch() al controller (POST con FormData)
+        //   5. Controller valida, cambia password, setea flash y devuelve JSON
+        //   6. JS hace redirect (loading sigue visible)
+        //   7. Dashboard carga + lee flash + muestra success
+        // ============================================================
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.querySelector('form[method="POST"]');
+            if (!form) return;
+
+            form.addEventListener('submit', async function(e) {
+                e.preventDefault();
+
+                // Mostrar loading
+                ScaModal.loading('Cambiando contraseña', 'Guardando tu nueva contraseña...');
+
+                try {
+                    const response = await fetch(form.action, {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                            'Accept': 'application/json',
+                        },
+                        body: new FormData(form),
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        // Option E: NO cerramos el loading. Se queda visible durante la navegación.
+                        // El success se mostrará en el dashboard vía flash sca_modal (seteado en el controller).
+                        window.location.href = data.redirect;
+                    } else {
+                        // En caso de error, cerrar el loading y mostrar error
+                        ScaModal.close();
+                        if (data.errors) {
+                            const errores = Object.values(data.errors).flat();
+                            ScaModal.error('Error de validación', errores.join('<br>'));
+                        } else {
+                            ScaModal.error('Error', data.mensaje || 'No se pudo cambiar la contraseña.');
+                        }
+                    }
+                } catch (err) {
+                    // Error de red/conexión
+                    ScaModal.close();
+                    ScaModal.error('Error de conexión', 'No se pudo contactar con el servidor. Inténtalo de nuevo.');
+                }
+            });
+        });
     </script>
 </body>
 </html>

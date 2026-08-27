@@ -6,7 +6,12 @@
 // CAMBIO V5:
 //   - La 'empresa' se valida a nivel de solicitud (no por cada externo).
 //   - Los externos ya no llevan 'empresa' ni 'tipo'.
-//   - prepareForValidation() convierte strings vacíos a null para evitar errores de validación.
+//   - prepareForValidation() convierte strings vacíos a null.
+//
+// ⚠️ CAMBIO V7 (unificación de identificación oficial):
+//   - Antes: externos.*.curp + externos.*.pasaporte + externos.*.tipo_id
+//   - Ahora: externos.*.tipo_identificacion + externos.*.identificacion
+//   - Tipos válidos: curp, credencial_votar, cedula_profesional, pasaporte
 
 namespace App\Http\Requests;
 
@@ -18,8 +23,6 @@ class StoreSolicitudRequest extends FormRequest
 
     /**
      * Convierte strings vacíos a null ANTES de validar.
-     * Los formularios HTML envían "" para los campos que el usuario no llenó.
-     * Si no los convertimos a null, las reglas 'integer' o 'size:18' fallarían.
      */
     protected function prepareForValidation(): void
     {
@@ -31,10 +34,15 @@ class StoreSolicitudRequest extends FormRequest
             $externos = $this->input('externos');
             if (is_array($externos)) {
                 foreach ($externos as $idx => $ext) {
-                    foreach (['curp', 'telefono'] as $campo) {
+                    // CAMBIO V7: ya no procesamos 'curp', ahora 'identificacion'
+                    foreach (['identificacion', 'telefono'] as $campo) {
                         if (isset($ext[$campo]) && $ext[$campo] === '') {
                             $externos[$idx][$campo] = null;
                         }
+                    }
+                    // Normalizar tipo_identificacion a lowercase
+                    if (isset($externos[$idx]['tipo_identificacion'])) {
+                        $externos[$idx]['tipo_identificacion'] = strtolower(trim($externos[$idx]['tipo_identificacion']));
                     }
                 }
                 $this->merge(['externos' => $externos]);
@@ -52,7 +60,6 @@ class StoreSolicitudRequest extends FormRequest
 
         $rules = [
             'tipo'              => ['required', 'in:pase_salida,interplantas,visita,contratista'],
-            // FIX A-1: Validación custom con tolerancia de 5 minutos
             'fecha_inicio'      => ['required', 'date', function ($attribute, $value, $fail) {
                 $inicio = \Carbon\Carbon::parse($value);
                 $ahora = now();
@@ -60,8 +67,6 @@ class StoreSolicitudRequest extends FormRequest
                     $fail('La fecha de inicio no puede ser en el pasado.');
                 }
             }],
-            // FIX F-2: fecha_fin es obligatorio EXCEPTO para pase_salida
-            // (en pase_salida se calcula automáticamente en el controlador)
             'fecha_fin'         => [$tipo === 'pase_salida' ? 'nullable' : 'required', 'date', 'after:fecha_inicio'],
             'motivo'            => ['required', 'string', 'max:1000'],
 
@@ -72,9 +77,11 @@ class StoreSolicitudRequest extends FormRequest
             'anfitrion_empleado_id' => ['nullable', 'integer'],
             'empresa'           => ['nullable', 'string', 'max:150'],
             'externos'          => ['nullable', 'array'],
-            'externos.*.curp'   => ['nullable', 'string', 'size:18'],
-            'externos.*.nombre' => ['nullable', 'string', 'max:200'],
-            'externos.*.telefono' => ['nullable', 'string', 'max:20'],
+            // CAMBIO V7: unificación de identificación oficial
+            'externos.*.tipo_identificacion' => ['required', 'in:curp,credencial_votar,cedula_profesional,pasaporte'],
+            'externos.*.identificacion'      => ['required', 'string', 'max:50'],
+            'externos.*.nombre'              => ['nullable', 'string', 'max:200'],
+            'externos.*.telefono'            => ['nullable', 'string', 'max:20'],
         ];
 
         if ($tipo === 'interplantas') {
@@ -93,11 +100,24 @@ class StoreSolicitudRequest extends FormRequest
             }
             $rules['externos'] = ['required', 'array', 'min:1'];
             $rules['externos.*.nombre'] = ['required', 'string', 'max:200'];
-            
-            // FIX G: La CURP o el Pasaporte son obligatorios (al menos uno)
-            $rules['externos.*.curp'] = ['nullable', 'string', 'size:18', 'regex:/^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d$/', 'required_without:externos.*.pasaporte'];
-            $rules['externos.*.pasaporte'] = ['nullable', 'string', 'min:5', 'max:50', 'required_without:externos.*.curp'];
-            $rules['externos.*.tipo_id'] = ['required', 'in:curp,pasaporte'];
+
+            // CAMBIO V7: tipo_identificacion + identificacion obligatorios para externos
+            $rules['externos.*.tipo_identificacion'] = ['required', 'in:curp,credencial_votar,cedula_profesional,pasaporte'];
+            $rules['externos.*.identificacion'] = ['required', 'string', 'max:50'];
+
+            // Validación específica por tipo (CURP: 18 caracteres)
+            $rules['externos.*.identificacion'] = array_merge(
+                $rules['externos.*.identificacion'],
+                [
+                    function ($attribute, $value, $fail) {
+                        $idx = explode('.', $attribute)[1];
+                        $tipoId = $this->input("externos.{$idx}.tipo_identificacion");
+                        if ($tipoId === 'curp' && strlen($value) !== 18) {
+                            $fail('La CURP debe tener exactamente 18 caracteres.');
+                        }
+                    },
+                ]
+            );
         }
 
         if ($tipo === 'contratista') {
@@ -120,10 +140,11 @@ class StoreSolicitudRequest extends FormRequest
             'externos.min'               => 'Debe agregar al menos una persona.',
             'externos.*.nombre.required' => 'El nombre de cada persona es obligatorio.',
             'empresa.required'           => 'La empresa es obligatoria para contratistas.',
-            'externos.*.curp.regex'      => 'El formato de la CURP no es válido.',
-            'externos.*.tipo_id.required'=> 'Debe seleccionar un tipo de identificación (CURP o Pasaporte).',
-            'externos.*.curp.required_without' => 'Debe ingresar la CURP o el Pasaporte.',
-            'externos.*.pasaporte.required_without' => 'Debe ingresar el Pasaporte o la CURP.',
+            // CAMBIO V7: mensajes unificados
+            'externos.*.tipo_identificacion.required' => 'Debe seleccionar el tipo de identificación oficial.',
+            'externos.*.tipo_identificacion.in'       => 'El tipo de identificación no es válido.',
+            'externos.*.identificacion.required'      => 'El número de identificación es obligatorio.',
+            'externos.*.identificacion.max'           => 'La identificación no puede exceder 50 caracteres.',
         ];
     }
 }

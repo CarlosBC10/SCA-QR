@@ -31,10 +31,11 @@
                 <i class="bi bi-person-badge"></i> {{ Auth::user()->nombre_completo }} ·
                 <i class="bi bi-geo-alt"></i> {{ Auth::user()->planta_nombre ?? 'Sin asignar' }}
             </p>
+        <div>
+        </div>
         </div>
 
-        <form method="POST" action="{{ route('guardia.terminar.turno') }}" id="form-terminar-turno"
-              onsubmit="return confirm('¿Está seguro de terminar su turno?\n\nSe cerrarán TODOS sus kioskos activos y su sesión.\n\nEsta acción no se puede deshacer.')">
+        <form method="POST" action="{{ route('guardia.terminar.turno') }}" id="form-terminar-turno" class="sca-form-terminar-turno">
             @csrf
             <button type="submit" class="btn btn-danger">
                 <i class="bi bi-box-arrow-right"></i> Terminar Turno
@@ -82,7 +83,7 @@
         <div class="col-md-6">
             <div class="card border-0 shadow-sm h-100 sca-card" style="border-radius: 12px; border-top: 4px solid #f57c00 !important;">
                 <div class="card-header bg-transparent py-3 d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0 fw-bold"><i class="bi bi-shield-exclamation text-warning"></i> Revisiones F10</h5>
+                    <h5 class="mb-0 fw-bold"><i class="bi bi-shield-exclamation text-warning"></i> Revisiones</h5>
                     <span class="badge bg-warning text-dark" id="count-revisions">0</span>
                 </div>
                 <div class="card-body" id="list-revisions" style="max-height: 50vh; overflow-y: auto;">
@@ -389,7 +390,7 @@
             };
             requestAnimationFrame(tick);
         } catch(e) {
-            alert('No se pudo acceder a la cámara: ' + e.message);
+            ScaModal.error('Error de cámara', 'No se pudo acceder a la cámara: ' + e.message);
             view.style.display = 'none';
         }
     }
@@ -478,7 +479,8 @@
                 `).join('');
             }
         } catch(e) {
-            console.error('Error fetchPending:', e);
+            if (e instanceof SyntaxError) { window.location.href = '{{ route("login") }}'; }
+            else { console.error('Error fetchPending:', e); }
         }
     }
 
@@ -498,7 +500,7 @@
         const idJustificacion = document.getElementById('justify-select').value;
 
         if (!idJustificacion) {
-            alert('Debe seleccionar una justificación.');
+            ScaModal.warning('Atención', 'Debe seleccionar una justificación.');
             return;
         }
 
@@ -519,10 +521,10 @@
                 fetchPending();
                 cargarFeed();
             } else {
-                alert(data.message || 'Error al justificar.');
+                ScaModal.error('Error', data.message || 'Error al justificar.');
             }
         } catch(e) {
-            alert('Error de conexión');
+            ScaModal.error('Error de conexión', 'No se pudo contactar con el servidor.');
         } finally {
             btn.disabled = false;
             btn.innerHTML = '<i class="bi bi-check-lg"></i> Justificar';
@@ -548,7 +550,7 @@
         const descripcion = document.getElementById('modal-desc').value;
 
         if (resultado === 'anomalia' && !descripcion.trim()) {
-            alert('Debe describir la anomalía.');
+            ScaModal.warning('Atención', 'Debe describir la anomalía.');
             return;
         }
 
@@ -573,10 +575,10 @@
                 fetchPending();
                 cargarFeed();
             } else {
-                alert(data.message || 'Error al resolver.');
+                ScaModal.error('Error', data.message || 'Error al resolver.');
             }
         } catch(e) {
-            alert('Error de conexión');
+            ScaModal.error('Error de conexión', 'No se pudo contactar con el servidor.');
         } finally {
             btn.disabled = false;
             btn.innerHTML = '<i class="bi bi-check-lg"></i> Guardar';
@@ -630,7 +632,8 @@
 
             lista.innerHTML = html;
         } catch(e) {
-            console.error('Error dentro:', e);
+            if (e instanceof SyntaxError) { window.location.href = '{{ route("login") }}'; }
+            else { console.error('Error dentro:', e); }
         }
     }
 
@@ -646,7 +649,8 @@
             feedData = await res.json();
             renderFeed();
         } catch(e) {
-            console.error('Error feed:', e);
+            if (e instanceof SyntaxError) { window.location.href = '{{ route("login") }}'; }
+            else { console.error('Error feed:', e); }
         }
     }
 
@@ -677,9 +681,22 @@
         datos.forEach(e => {
             let accion = matchAccion(e.estado, e.evento);
 
-            let tipoBadge = e.tipo_persona === 'Emp'
-                ? '<span class="badge bg-success-subtle text-success border border-success-subtle">Emp</span>'
-                : '<span class="badge bg-info-subtle text-info border border-info-subtle">Vis</span>';
+            // FIX V7 (Problema 3 y 4): badges con labels completos + colores
+            // distintos según el tipo de persona. Para empleados, mostrar la
+            // planta base (de dónde viene).
+            let tipoBadge = '';
+            if (e.tipo_persona === 'Emp') {
+                // Empleado: verde + planta base si está disponible
+                const plantaTxt = (e.planta_base && e.planta_base !== '—')
+                    ? ` · ${e.planta_base}` : '';
+                tipoBadge = `<span class="badge bg-success-subtle text-success border border-success-subtle">Emp${plantaTxt}</span>`;
+            } else if (e.tipo_persona === 'Contratista') {
+                // Contratista: morado (Bootstrap no tiene morado-subtle, usamos inline)
+                tipoBadge = `<span class="badge border" style="background: rgba(111, 66, 193, 0.12); color: #6f42c1; border-color: rgba(111, 66, 193, 0.25) !important;">Contratista</span>`;
+            } else {
+                // Visita: naranja
+                tipoBadge = `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Visita</span>`;
+            }
 
             let detalle = '';
             if (e.estado === 'denegado' && e.motivo) {
@@ -737,6 +754,48 @@
         };
         return map[motivo] || motivo;
     }
+
+// ============================================================
+// M5 [ScaModal] — Terminar turno con confirm + loading + AJAX
+// ============================================================
+document.addEventListener('DOMContentLoaded', function() {
+    const formTerminar = document.querySelector('.sca-form-terminar-turno');
+    if (formTerminar) {
+        formTerminar.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            ScaModal.confirm({
+                titulo: '¿Terminar turno?',
+                mensaje: 'Se cerrarán <strong>TODOS</strong> sus kioskos activos y su sesión.<br><br><small class="text-muted">Esta acción no se puede deshacer.</small>',
+                tipo: 'danger',
+                textoConfirmar: 'Sí, terminar',
+                textoCancelar: 'Cancelar',
+                onConfirm: async () => {
+                    ScaModal.loading('Terminando turno', 'Cerrando kioskos y sesión...');
+                    try {
+                        const res = await fetch(formTerminar.action, {
+                            method: 'POST',
+                            headers: {
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                                'Accept': 'application/json',
+                            },
+                            body: new FormData(formTerminar),
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            window.location.href = data.redirect;
+                        } else {
+                            ScaModal.close();
+                            ScaModal.error('Error', data.mensaje || 'No se pudo terminar el turno.');
+                        }
+                    } catch(err) {
+                        ScaModal.close();
+                        ScaModal.error('Error de conexión', 'No se pudo contactar con el servidor.');
+                    }
+                }
+            });
+        });
+    }
+});
 </script>
 @endpush
 @endsection

@@ -23,7 +23,8 @@
     </p>
 </div>
 
-<form method="POST" action="{{ route('usuarios.update', $usuario) }}">
+{{-- M2 [ScaModal] — Agregamos id="form-edit-usuario" para que el JS lo intercepte --}}
+<form method="POST" action="{{ route('usuarios.update', $usuario) }}" id="form-edit-usuario">
     @csrf
     @method('PUT')
 
@@ -34,9 +35,29 @@
                     <label class="form-label">Rol</label>
                     <select name="id_rol" class="form-select" required>
                         @foreach($rolesPermitidos as $r)
-                            <option value="{{ $r->id_rol }}" @if(old('id_rol', $usuario->id_rol)==$r->id_rol) selected @endif>{{ $r->nombre }}</option>
+                            {{-- M2: Filtrar roles según tipo de usuario:
+                                - Si es guardia → solo puede ser Guardia (no tiene registro en sitec)
+                                - Si es interno → no puede ser Guardia (no tiene registro en guardias) --}}
+                            @if($usuario->esGuardia())
+                                @if($r->nombre === 'Guardia')
+                                    <option value="{{ $r->id_rol }}" @if(old('id_rol', $usuario->id_rol)==$r->id_rol) selected @endif>{{ $r->nombre }}</option>
+                                @endif
+                            @else
+                                @if($r->nombre !== 'Guardia')
+                                    <option value="{{ $r->id_rol }}" @if(old('id_rol', $usuario->id_rol)==$r->id_rol) selected @endif>{{ $r->nombre }}</option>
+                                @endif
+                            @endif
                         @endforeach
                     </select>
+                    @if($usuario->esGuardia())
+                        <div class="form-text text-muted">
+                            <i class="bi bi-info-circle"></i> Los guardias solo pueden tener rol de Guardia.
+                        </div>
+                    @else
+                        <div class="form-text text-muted">
+                            <i class="bi bi-info-circle"></i> Los empleados internos no pueden tener rol de Guardia.
+                        </div>
+                    @endif
                 </div>
 
                 <div class="col-md-6 mb-3">
@@ -92,21 +113,109 @@
                     </select>
                 </div>
                 @endif
-
-                <div class="col-12 mb-3">
-                    <label class="form-label">Restablecer contraseña</label>
-                    <input type="password" name="password" class="form-control" minlength="8" value="{{ old('password') }}">
-                    <div class="form-text">Dejar en blanco para mantener la contraseña actual. Mínimo 8 caracteres.</div>
-                </div>
             </div>
         </div>
     </div>
 
+    {{-- M2 [ScaModal] — Eliminado el campo "Restablecer contraseña" de la edición.
+        Era redundante con el botón "Resetear contraseña" (🔑) de la lista de usuarios,
+        que además envía correo de notificación al usuario. Si el admin necesita cambiar
+        la contraseña, debe usar ese botón. --}}
     <div class="d-flex gap-2">
-        <button type="submit" class="btn btn-success">
+        <button type="submit" class="btn btn-success" id="btn-guardar-usuario">
             <i class="bi bi-check-circle"></i> Guardar Cambios
         </button>
         <a href="{{ route('usuarios.index') }}" class="btn btn-outline-secondary">Cancelar</a>
     </div>
 </form>
+
+@push('scripts')
+<script>
+// ============================================================
+// M2 [ScaModal] — Intercept form submit for AJAX + confirm + loading
+//
+// FLUJO:
+//   1. Admin hace clic en "Guardar Cambios"
+//   2. ScaModal.confirm con resumen de cambios
+//   3. ScaModal.loading "Guardando..."
+//   4. fetch() AJAX PUT al controller
+//   5. Controller actualiza + setea flash + devuelve JSON
+//   6. JS redirect (loading se queda visible)
+//   7. usuarios.index carga + success aparece vía flash
+// ============================================================
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('form-edit-usuario');
+    if (!form) return;
+
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const btn = document.getElementById('btn-guardar-usuario');
+        const originalBtnHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Procesando...';
+
+        // ===== Construir resumen para el confirm =====
+        const rolSelect = form.querySelector('select[name="id_rol"]');
+        const rolNombre = rolSelect.options[rolSelect.selectedIndex].text;
+
+        const estadoSelect = form.querySelector('select[name="activo"]');
+        const estadoNombre = estadoSelect.options[estadoSelect.selectedIndex].text;
+
+        // Tomar el nombre del usuario del H1 de la página
+        const nombreUsuario = document.querySelector('p.text-muted')?.textContent.trim().split('·')[0].trim() || 'este usuario';
+
+        let mensaje = `<div class="text-start">`;
+        mensaje += `<div class="mb-2"><strong>Usuario:</strong> ${nombreUsuario}</div>`;
+        mensaje += `<div class="mb-2"><strong>Rol:</strong> ${rolNombre}</div>`;
+        mensaje += `<div class="mb-2"><strong>Estado:</strong> ${estadoNombre}</div>`;
+        mensaje += `</div>`;
+
+        ScaModal.confirm({
+            titulo: '¿Guardar cambios?',
+            mensaje: mensaje,
+            tipo: 'warning',
+            textoConfirmar: 'Sí, guardar',
+            textoCancelar: 'Cancelar',
+            onConfirm: async () => {
+                ScaModal.loading('Guardando cambios', 'Actualizando datos del usuario...');
+
+                try {
+                    const res = await fetch(form.action, {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                            'Accept': 'application/json',
+                        },
+                        body: new FormData(form),
+                    });
+                    const data = await res.json();
+
+                    if (data.success) {
+                        // Option E: NO cerrar loading. Redirect directo.
+                        window.location.href = data.redirect;
+                    } else {
+                        ScaModal.close();
+                        ScaModal.error(data.titulo || 'Error', data.mensaje || 'No se pudo guardar.');
+                        btn.disabled = false;
+                        btn.innerHTML = originalBtnHtml;
+                    }
+                } catch(err) {
+                    ScaModal.close();
+                    ScaModal.error('Error de conexión', 'No se pudo contactar con el servidor.');
+                    btn.disabled = false;
+                    btn.innerHTML = originalBtnHtml;
+                }
+            },
+            onCancel: () => {
+                // Si cancela, rehabilitar el botón
+                btn.disabled = false;
+                btn.innerHTML = originalBtnHtml;
+            }
+        });
+    });
+});
+</script>
+@endpush
+
 @endsection

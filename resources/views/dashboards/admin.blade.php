@@ -19,8 +19,20 @@
 
 @php
     // V4: Solicitud eliminado; contar pendientes en solicitudes_int + solicitudes_ext
-    // Internas: pendiente_origen o pendiente_destino
-    $pendientesInt = \App\Models\SolicitudInt::whereIn('estado', ['pendiente_origen', 'pendiente_destino'])->count();
+    //
+    // FIX 3-g (Admin): ahora contamos también las solicitudes en 'aprobado_parcial'
+    // que siguen esperando revisión de algún aprobador (origen o destino).
+    // El Admin ve TODAS las plantas, así que no hay scoping.
+    $pendientesInt = \App\Models\SolicitudInt::where(function($q) {
+        $q->whereIn('estado', ['pendiente_origen', 'pendiente_destino'])
+          ->orWhere(function($q2) {
+              $q2->where('estado', 'aprobado_parcial')
+                 ->where(function($q3) {
+                     $q3->whereNull('fecha_aprobacion_origen')
+                        ->orWhereNull('fecha_aprobacion_destino');
+                 });
+          });
+    })->count();
     // Externas: pendiente (una sola aprobación)
     $pendientesExt = \App\Models\SolicitudExt::where('estado', 'pendiente')->count();
     $pendientesCount = $pendientesInt + $pendientesExt;

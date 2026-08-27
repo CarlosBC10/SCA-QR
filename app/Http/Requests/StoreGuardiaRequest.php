@@ -22,11 +22,12 @@ class StoreGuardiaRequest extends FormRequest
         return [
             // Validamos que el ID tenga el formato correcto y sea único en la tabla guardias
             'id_guardia'       => ['required', 'string', 'max:30', 'unique:guardias,id_guardia', 'regex:/^G-\d{4,5}$/'],
-            'email_emp'        => ['required', 'email', 'max:100'], // FIX I-10: Correo institucional obligatorio
             'nombre_completo'  => ['required', 'string', 'max:200'],
-            'curp'             => ['nullable', 'string', 'size:18', 'regex:/^[A-Z0-9]+$/i', 'unique:guardias,curp'],
+            // M2: CURP obligatoria para guardias (era opcional).
+            'curp'             => ['required', 'string', 'size:18', 'regex:/^[A-Z0-9]+$/i', 'unique:guardias,curp'],
             'id_planta'        => ['required', 'integer', 'exists:plantas,id_planta'],
-            'password' => ['nullable', 'string', Password::min(8)->mixedCase()->numbers()->symbols()],
+            // M2 [ScaModal] — Los guardias NO reciben correo. El admin define la contraseña.
+            'password'         => ['required', 'string', 'confirmed', Password::min(8)->mixedCase()->numbers()->symbols()],
         ];
     }
 
@@ -37,12 +38,14 @@ class StoreGuardiaRequest extends FormRequest
             'id_guardia.regex'          => 'El formato debe ser G- seguido de 4 o 5 dígitos (ej: G-0001).',
             'id_guardia.unique'         => 'Ya existe un guardia con ese usuario.',
             'nombre_completo.required'  => 'El nombre del guardia es obligatorio.',
+            'curp.required'             => 'La CURP es obligatoria.',
             'curp.size'                 => 'La CURP debe tener exactamente 18 caracteres.',
             'curp.regex'                => 'La CURP solo debe contener letras y números.',
             'curp.unique'               => 'Ya existe un guardia con esa CURP.',
             'id_planta.required'        => 'Debe seleccionar una planta.',
             'id_planta.exists'          => 'La planta seleccionada no es válida.',
             'password.required'         => 'La contraseña es obligatoria.',
+            'password.confirmed'        => 'Las contraseñas no coinciden.',
         ];
     }
 }

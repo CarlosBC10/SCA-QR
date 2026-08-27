@@ -4,6 +4,13 @@
 // CAMBIO V5:
 //   - Agregada columna 'empresa'. Se asocia a la solicitud, no a la persona.
 //   - Si es visita: empresa opcional. Si es contratista: empresa obligatoria.
+//
+// CAMBIO V7 (Sprint 2 - expiración lazy):
+//   - Agregado accessor estado_actual que expira la solicitud automáticamente
+//     cuando se consulta y ya venció.
+//   - Agregado motivoExpiracion() que infiere si expiró por 'no_atendida'
+//     o 'vigencia_concluida' sin necesidad de columna extra en BD.
+//   - estaVigenteAprobada() ahora usa estado_actual (accessor lazy).
 
 namespace App\Models;
 
@@ -23,7 +30,7 @@ class SolicitudExt extends Model
         'fecha_inicio',
         'fecha_fin',
         'motivo',
-        'estado',                       // pendiente | aprobado | rechazado
+        'estado',                       // pendiente | aprobado | rechazado | aprobado_parcial | expirado
         'aprobador_destino_empleado_id',
         'fecha_aprobacion_destino',
         'motivo_rechazo',
@@ -34,6 +41,10 @@ class SolicitudExt extends Model
         'fecha_fin'                => 'datetime',
         'fecha_aprobacion_destino' => 'datetime',
     ];
+
+    // ============================================================
+    // RELACIONES
+    // ============================================================
 
     public function plantaDestino()
     {
@@ -61,17 +72,111 @@ class SolicitudExt extends Model
         return $this->hasMany(SolicitudExternoDetalle::class, 'id_solicitud_ext', 'id_solicitud_ext');
     }
 
+    // ============================================================
+    // EXPIRACIÓN LAZY (Sprint 2 - CAMBIO V7)
+    // ============================================================
+    //
+    // ¿Por qué lazy?
+    //   No queremos un cron ni un proceso en background. En lugar de
+    //   eso, cada vez que alguien consulta el estado de una solicitud
+    //   (escáner, bandeja, show, etc.), este accessor valida si ya
+    //   venció y, si es así, la marca como 'expirado' en BD en ese
+    //   momento. La siguiente consulta ya la encuentra expirada.
+
+    /**
+     * ACCESSOR: estado real de la solicitud, considerando expiración lazy.
+     *
+     * Uso: $solicitud->estado_actual  (NO $solicitud->estado)
+     *
+     * Lógica:
+     *   - Si ya está 'rechazado' o 'expirado' → devolver tal cual.
+     *   - Si fecha_fin < now() y está en pendiente/aprobado/aprobado_parcial:
+     *     → actualizar BD a 'expirado'
+     *     → invalidar QRs de los externos (los 'autorizado' pasan a 'expirado')
+     *     → devolver 'expirado'
+     *   - Si no → devolver el estado original.
+     */
+    public function getEstadoActualAttribute(): string
+    {
+        // Si ya está en un estado terminal, no hacer nada
+        if (in_array($this->estado, ['rechazado', 'expirado'])) {
+            return $this->estado;
+        }
+
+        // Si la vigencia ya pasó, expirar
+        if ($this->fecha_fin && $this->fecha_fin < now()) {
+            $this->estado = 'expirado';
+            $this->save();
+
+            // Invalidar QRs de los externos de esta solicitud.
+            // Solo los 'autorizado' pasan a 'expirado' (los 'pendiente' y
+            // 'cancelado' se quedan como están, no tenían QR activo).
+            \App\Models\SolicitudExternoDetalle::where('id_solicitud_ext', $this->id_solicitud_ext)
+                ->where('estado_qr', 'autorizado')
+                ->update([
+                    'estado_qr' => 'expirado',
+                    'codigo_qr' => null,  // se invalida el código
+                ]);
+
+            return 'expirado';
+        }
+
+        return $this->estado;
+    }
+
+    /**
+     * Infiere el motivo de expiración SIN necesidad de una columna extra.
+     *
+     * Reglas:
+     *   - Si no está expirada → NULL
+     *   - Si fecha_aprobacion_destino IS NULL → 'no_atendida'
+     *     (nadie la aprobó a tiempo)
+     *   - Si fecha_aprobacion_destino NOT NULL → 'vigencia_concluida'
+     *     (se aprobó, se usó, y la vigencia terminó naturalmente)
+     */
+    public function motivoExpiracion(): ?string
+    {
+        if ($this->estado_actual !== 'expirado') {
+            return null;
+        }
+
+        if (empty($this->fecha_aprobacion_destino)) {
+            return 'no_atendida';
+        }
+
+        return 'vigencia_concluida';
+    }
+
+    /**
+     * Etiqueta legible para mostrar en vistas.
+     */
+    public function getMotivoExpiracionLabelAttribute(): string
+    {
+        return match($this->motivoExpiracion()) {
+            'no_atendida'         => 'No fue atendida a tiempo',
+            'vigencia_concluida'  => 'Vigencia concluida',
+            default               => '—',
+        };
+    }
+
+    // ============================================================
+    // VALIDACIÓN DE VIGENCIA (para el escáner)
+    // ============================================================
+
+    /**
+     * ¿Está vigente y aprobada? (para validar acceso en scanner)
+     *
+     * CAMBIO V7: usa estado_actual (accessor lazy) en vez de estado.
+     * Acepta 'aprobado' y 'aprobado_parcial' (los cancelados se filtran
+     * con qrActivo()). Rechaza 'expirado' y valida fecha_fin.
+     */
     public function estaVigenteAprobada(): bool
     {
-        // FIX C-1: Aprobaciones parciales también deben dejar pasar a los externos autorizados.
+        $estado = $this->estado_actual;  // ← accessor lazy
         $ahora = now();
-        
-        // FIX: Si la BD guarda fecha_fin como DATE (sin hora), Carbon lo lee como 00:00:00.
-        // Usamos endOfDay() para que la vigencia dure hasta las 23:59:59 de ese día.
-        $fechaFin = $this->fecha_fin ? \Carbon\Carbon::parse($this->fecha_fin)->endOfDay() : null;
 
-        return in_array($this->estado, ['aprobado', 'aprobado_parcial'], true)
+        return in_array($estado, ['aprobado', 'aprobado_parcial'], true)
             && $this->fecha_inicio <= $ahora
-            && $fechaFin >= $ahora;
+            && $this->fecha_fin >= $ahora;
     }
 }

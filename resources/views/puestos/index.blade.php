@@ -228,62 +228,15 @@
 </div>
 @endif
 
-{{-- Modal de confirmación individual --}}
-<div class="modal fade" id="confirmModal" tabindex="-1" data-bs-backdrop="static">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content sca-modal-content" style="border-radius:16px;">
-            <div class="modal-header border-0 pb-0">
-                <h5 class="modal-title fw-bold"><i class="bi bi-shield-exclamation text-warning"></i> <span id="modal-title-text">Confirmar</span></h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body pt-2">
-                <p class="mb-3" id="modal-message">¿Está seguro?</p>
-                <div class="confirm-count" id="modal-count-box">
-                    <div class="d-flex align-items-center justify-content-center gap-3">
-                        <i class="bi bi-people-fill fs-1 text-warning"></i>
-                        <div>
-                            <div class="num" id="modal-count-num">0</div>
-                            <div class="small text-muted">empleados serán actualizados</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer border-0 pt-0">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
-                <button type="button" class="btn btn-success" id="modal-confirm-btn"><span class="btn-text"><i class="bi bi-check-lg"></i> Sí, clasificar</span></button>
-            </div>
-        </div>
-    </div>
-</div>
+{{-- M2 [ScaModal] — Modal de confirmación individual eliminado.
+    Reemplazado por ScaModal.confirm() en el JS abajo.
+    Antes era un modal custom con .sca-modal-content. Ahora usa la API unificada
+    de ScaModal que tiene el mismo look pero con animación spring, glassmorphism, etc. --}}
 
-{{-- FIX J-2: Modal de confirmación masiva --}}
-<div class="modal fade" id="modalMasivo" tabindex="-1" data-bs-backdrop="static">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content sca-modal-content" style="border-radius:16px;">
-            <div class="modal-header border-0 pb-0">
-                <h5 class="modal-title fw-bold"><i class="bi bi-stack text-warning"></i> Confirmar clasificación masiva</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body pt-2">
-                <p id="modal-masivo-message">¿Está seguro?</p>
-                <div class="confirm-count">
-                    <div class="d-flex align-items-center justify-content-center gap-3">
-                        <i class="bi bi-stack fs-1 text-warning"></i>
-                        <div>
-                            <div class="num" id="modal-masivo-num">0</div>
-                            <div class="small text-muted">puestos serán reclasificados</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="mt-3 small text-muted"><i class="bi bi-info-circle"></i> Todos los empleados con los puestos seleccionados serán actualizados. Esto puede tardar varios segundos.</div>
-            </div>
-            <div class="modal-footer border-0 pt-0">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
-                <button type="button" class="btn btn-success" id="modal-masivo-confirm-btn"><span class="btn-text"><i class="bi bi-check-lg"></i> Sí, clasificar todos</span></button>
-            </div>
-        </div>
-    </div>
-</div>
+
+{{-- M2 [ScaModal] — Modal de confirmación masiva eliminado.
+    Reemplazado por ScaModal.confirm() en el JS abajo. --}}
+
 
 {{-- FIX J-3: Modal para ver empleados del puesto --}}
 <div class="modal fade" id="modalEmpleadosPuesto" tabindex="-1">
@@ -333,8 +286,8 @@
 @push('scripts')
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    let confirmModal = new bootstrap.Modal(document.getElementById('confirmModal'));
-    let masivoModal = new bootstrap.Modal(document.getElementById('modalMasivo'));
+    // M2 [ScaModal] — Solo empModal sigue siendo custom (info-only con tabla filtrable).
+    // confirmModal y masivoModal fueron reemplazados por ScaModal.confirm().
     let empModal = new bootstrap.Modal(document.getElementById('modalEmpleadosPuesto'));
     let pendingAction = null;
     let pendingMasivo = null;
@@ -349,36 +302,59 @@ document.addEventListener('DOMContentLoaded', function() {
             const puestoNombre = card.querySelector('h6').textContent;
             const tipoActual = card.dataset.tipoActual || '';
 
-            if (tipoActual === tipo) { showToast('warning', 'Sin cambios', `El puesto ya está clasificado como ${tipo}.`); return; }
+            if (tipoActual === tipo) { 
+                ScaModal.warning('Sin cambios', `El puesto ya está clasificado como <strong>${tipo}</strong>.`); 
+                return; 
+            }
 
-            document.getElementById('modal-title-text').textContent = tipoActual ? 'Recategorizar puesto' : 'Clasificar puesto';
-            document.getElementById('modal-message').innerHTML = `¿Clasificar "<strong>${puestoNombre}</strong>" como <strong class="text-capitalize">${tipo}</strong>?`;
-            document.getElementById('modal-count-num').textContent = count;
-            
-            pendingAction = { idPuesto, tipo, card, count, puestoNombre, tipoActual };
-            confirmModal.show();
-        });
-    });
+            // Construir mensaje para ScaModal.confirm
+            const tipoLabel = tipo.charAt(0).toUpperCase() + tipo.slice(1);
+            const titulo = tipoActual ? '¿Recategorizar puesto?' : '¿Clasificar puesto?';
+            const mensaje = `<div class="text-start">` +
+                `<div class="mb-2">Puesto: <strong>${puestoNombre}</strong></div>` +
+                `<div class="mb-2">Nueva clasificación: <strong>${tipoLabel}</strong></div>` +
+                `<div class="mt-3 p-2 rounded" style="background: rgba(245,158,11,0.12);">` +
+                `<i class="bi bi-people-fill text-warning"></i> ` +
+                `<strong>${count}</strong> empleado(s) serán actualizados.` +
+                `</div></div>`;
 
-    document.getElementById('modal-confirm-btn').addEventListener('click', async function() {
-        if (!pendingAction) return;
-        const { idPuesto, tipo, card, count, puestoNombre, tipoActual } = pendingAction;
-        this.disabled = true; this.querySelector('.btn-text').innerHTML = '<span class="spinner-border spinner-border-sm"></span> Procesando...';
-        card.classList.add('processing');
+            ScaModal.confirm({
+                titulo: titulo,
+                mensaje: mensaje,
+                tipo: 'warning',
+                textoConfirmar: 'Sí, clasificar',
+                textoCancelar: 'Cancelar',
+                onConfirm: async () => {
+                    // Mostrar loading
+                    ScaModal.loading('Clasificando puesto', 'Actualizando empleados con este puesto...');
 
-        try {
-            const res = await fetch('{{ route("puestos.store") }}', {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}' },
-                body: JSON.stringify({ id_puesto: parseInt(idPuesto), tipo_empleado: tipo })
+                    try {
+                        const res = await fetch('{{ route("puestos.store") }}', {
+                            method: 'POST', 
+                            headers: { 
+                                'Content-Type': 'application/json', 
+                                'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                                'Accept': 'application/json',
+                            },
+                            body: JSON.stringify({ id_puesto: parseInt(idPuesto), tipo_empleado: tipo })
+                        });
+                        const data = await res.json();
+
+                        if (data.success) {
+                            // Option E: NO cerrar loading. Redirect directo.
+                            // El success se mostrará en puestos.index vía flash.
+                            window.location.href = data.redirect;
+                        } else {
+                            ScaModal.close();
+                            ScaModal.error(data.titulo || 'Error', data.mensaje || 'No se pudo clasificar.');
+                        }
+                    } catch(e) { 
+                        ScaModal.close();
+                        ScaModal.error('Error de conexión', e.message); 
+                    }
+                }
             });
-            if (res.ok) {
-                updateCardUI(card, tipo);
-                updateStats(tipoActual, tipo);
-                showToast('success', 'Clasificación actualizada', `${puestoNombre} → ${tipo}. ${count} empleado(s).`);
-                confirmModal.hide();
-            } else { showToast('danger', 'Error', 'No se pudo clasificar.'); confirmModal.hide(); }
-        } catch(e) { showToast('danger', 'Error de conexión', e.message); confirmModal.hide(); }
-        finally { this.disabled = false; this.querySelector('.btn-text').innerHTML = '<i class="bi bi-check-lg"></i> Sí, clasificar'; card.classList.remove('processing'); pendingAction = null; }
+        });
     });
 
     // --- Clasificación Masiva (J-2) ---
@@ -402,27 +378,67 @@ document.addEventListener('DOMContentLoaded', function() {
         const seleccionados = Array.from(document.querySelectorAll('.puesto-check:checked')).map(cb => parseInt(cb.value));
         if (seleccionados.length === 0) return;
         const labels = { 'operativo': 'Operativo', 'administrativo': 'Administrativo', 'corporativo': 'Corporativo' };
-        document.getElementById('modal-masivo-message').innerHTML = `¿Clasificar <strong>${seleccionados.length}</strong> puesto(s) como <strong>${labels[tipo]}</strong>?`;
-        document.getElementById('modal-masivo-num').textContent = seleccionados.length;
+        
+        // M2 [ScaModal] — Reemplazamos el modal custom por ScaModal.confirm()
+        const mensaje = `<div class="text-start">` +
+            `<div class="mb-2">Se clasificarán <strong>${seleccionados.length}</strong> puesto(s) como <strong>${labels[tipo]}</strong>.</div>` +
+            `<div class="mt-3 p-2 rounded" style="background: rgba(245,158,11,0.12);">` +
+            `<i class="bi bi-info-circle text-warning"></i> ` +
+            `Todos los empleados con los puestos seleccionados serán actualizados. Esto puede tardar varios segundos.` +
+            `</div></div>`;
+
         pendingMasivo = { id_puestos: seleccionados, tipo };
-        masivoModal.show();
+
+        ScaModal.confirm({
+            titulo: 'Confirmar clasificación masiva',
+            mensaje: mensaje,
+            tipo: 'warning',
+            textoConfirmar: 'Sí, clasificar todos',
+            textoCancelar: 'Cancelar',
+            onConfirm: async () => {
+                // Mostrar loading
+                ScaModal.loading('Clasificando puestos', `Procesando ${seleccionados.length} puesto(s)...`);
+
+                try {
+                    // Hacemos fetch AJAX en vez de crear un form y submit
+                    const formData = new FormData();
+                    formData.append('_token', '{{ csrf_token() }}');
+                    formData.append('tipo_empleado', tipo);
+                    seleccionados.forEach(id => formData.append('id_puestos[]', id));
+
+                    const res = await fetch('{{ route("puestos.clasificar.masivo") }}', {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                            'Accept': 'application/json',
+                        },
+                        body: formData,
+                    });
+                    const data = await res.json();
+
+                    if (data.success) {
+                        // Option E: NO cerrar loading. Redirect directo.
+                        window.location.href = data.redirect;
+                    } else {
+                        ScaModal.close();
+                        ScaModal.error(data.titulo || 'Error', data.mensaje || 'No se pudo clasificar.');
+                    }
+                } catch(e) {
+                    ScaModal.close();
+                    ScaModal.error('Error de conexión', e.message);
+                }
+            }
+        });
     }
 
     document.getElementById('btn-masivo-operativo').addEventListener('click', () => abrirMasivo('operativo'));
     document.getElementById('btn-masivo-administrativo').addEventListener('click', () => abrirMasivo('administrativo'));
     document.getElementById('btn-masivo-corporativo').addEventListener('click', () => abrirMasivo('corporativo'));
 
-    document.getElementById('modal-masivo-confirm-btn').addEventListener('click', function() {
-        if (!pendingMasivo) return;
-        const form = document.createElement('form');
-        form.method = 'POST'; form.action = '{{ route("puestos.clasificar.masivo") }}';
-        const csrf = document.createElement('input'); csrf.type = 'hidden'; csrf.name = '_token'; csrf.value = '{{ csrf_token() }}'; form.appendChild(csrf);
-        pendingMasivo.id_puestos.forEach(id => { const i = document.createElement('input'); i.type = 'hidden'; i.name = 'id_puestos[]'; i.value = id; form.appendChild(i); });
-        const tipoInput = document.createElement('input'); tipoInput.type = 'hidden'; tipoInput.name = 'tipo_empleado'; tipoInput.value = pendingMasivo.tipo; form.appendChild(tipoInput);
-        document.body.appendChild(form); form.submit();
-    });
-
     // --- Ver Empleados del Puesto (J-3) ---
+    // Guardamos la lista completa para poder filtrarla con el buscador.
+    let todosLosEmpleadosPuesto = [];
+
     window.verEmpleadosPuesto = async function(idPuesto, nombrePuesto) {
         document.getElementById('modal-emp-title').textContent = `Empleados con puesto: ${nombrePuesto}`;
         document.getElementById('modal-emp-loading').style.display = 'block';
@@ -431,17 +447,36 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const res = await fetch(`{{ route("puestos.empleados", ['id_puesto' => ':ID']) }}`.replace(':ID', idPuesto));
             const data = await res.json();
-            renderEmpleadosTabla(data.empleados || []);
+            // Guardamos la lista completa para el filtro
+            todosLosEmpleadosPuesto = data.empleados || [];
+            // Limpiar el buscador por si tenía texto de una búsqueda anterior
+            document.getElementById('modal-emp-search').value = '';
+            // Renderizar todos
+            renderEmpleadosTabla(todosLosEmpleadosPuesto);
             document.getElementById('modal-emp-loading').style.display = 'none';
             document.getElementById('modal-emp-content').style.display = 'block';
             document.getElementById('modal-emp-summary').innerHTML = `<i class="bi bi-info-circle"></i> Puesto: <strong>${data.puesto}</strong> · Total: <strong>${data.total}</strong> empleado(s)`;
         } catch(e) { document.getElementById('modal-emp-loading').innerHTML = `<div class="alert alert-danger">Error: ${e.message}</div>`; }
     };
 
+    // Handler del buscador — filtra la lista completa al escribir.
+    // Antes este handler no existía, por eso el buscador no filtraba nada.
+    document.getElementById('modal-emp-search').addEventListener('input', function() {
+        const q = this.value.toLowerCase().trim();
+        const filtrados = todosLosEmpleadosPuesto.filter(e => {
+            // Buscar en nombre, departamento y planta
+            return (e.nombre || '').toLowerCase().includes(q) ||
+                   (e.departamento || '').toLowerCase().includes(q) ||
+                   (e.planta || '').toLowerCase().includes(q);
+        });
+        renderEmpleadosTabla(filtrados);
+    });
+
     function renderEmpleadosTabla(lista) {
         const tbody = document.getElementById('modal-emp-tbody');
-        tbody.innerHTML = lista.length === 0 ? '<tr><td colspan="4" class="text-center text-muted py-3">Sin empleados</td></tr>' : 
-            lista.map(e => `<tr><td><code>${e.id}</code></td><td>${e.nombre}</td><td>${e.departamento}</td><td><span class="badge bg-light text-dark">${e.planta}</span></td></tr>`).join('');
+        tbody.innerHTML = lista.length === 0 
+            ? '<tr><td colspan="4" class="text-center text-muted py-3"><i class="bi bi-search"></i> Sin resultados</td></tr>' 
+            : lista.map(e => `<tr><td><code>${e.id}</code></td><td>${e.nombre}</td><td>${e.departamento}</td><td><span class="badge bg-light text-dark">${e.planta}</span></td></tr>`).join('');
     }
 
     // --- UI Helpers ---

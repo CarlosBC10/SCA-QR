@@ -322,11 +322,9 @@
             <form method="POST" action="{{ route('login') }}">
                 @csrf
 
-                @if (session('success'))
-                    <div class="alert alert-success" style="border-radius:12px;">
-                        <i class="bi bi-check-circle-fill"></i> {{ session('success') }}
-                    </div>
-                @endif
+                {{-- M2 [ScaModal] — Eliminado el lector duplicado session('success').
+                    Esta vista extiende layouts/app.blade.php, que ya tiene el lector
+                    sca_modal. Si lo dejábamos, aparecían AMBOS (alerta vieja + modal). --}}
                 @if ($errors->any())
                     <div class="login-error">
                         <i class="bi bi-exclamation-triangle-fill"></i> {{ $errors->first() }}

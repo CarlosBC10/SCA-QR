@@ -60,10 +60,20 @@ class SolicitudController extends Controller
         if ($user->isAprobador() || $user->isAdmin() || $user->isSuperadmin()) {
             $plantaId = $user->planta_id;
 
-            // Pendientes internos (origen o destino)
+            // FIX: Contar pendientes internos (incluye aprobado_parcial si le toca al aprobador)
             $pendientesInt = SolicitudInt::where(function ($q) use ($plantaId) {
-                $q->where('id_planta_origen', $plantaId)->where('estado', 'pendiente_origen')
-                  ->orWhere('id_planta_destino', $plantaId)->where('estado', 'pendiente_destino');
+                // Pendientes en origen (o parcial donde origen no aprobó)
+                $q->where(function ($q2) use ($plantaId) {
+                    $q2->where('id_planta_origen', $plantaId)
+                       ->whereIn('estado', ['pendiente_origen', 'aprobado_parcial'])
+                       ->whereNull('fecha_aprobacion_origen');
+                })
+                // Pendientes en destino (o parcial donde destino no aprobó)
+                ->orWhere(function ($q2) use ($plantaId) {
+                    $q2->where('id_planta_destino', $plantaId)
+                       ->whereIn('estado', ['pendiente_destino', 'aprobado_parcial'])
+                       ->whereNull('fecha_aprobacion_destino');
+                });
             })->count();
 
             // Pendientes externos (destino)
@@ -90,7 +100,7 @@ class SolicitudController extends Controller
         // no debería ver el formulario. Redirigir al hub con mensaje.
         if (empty($tiposPermitidos)) {
             return redirect()->route('solicitudes.hub')
-                ->with('error', 'Su rol no puede crear solicitudes.');
+                ->with('sca_modal', sca_modal_flash('error', 'Acción no permitida', 'Su rol no puede crear solicitudes.'));
         }
 
         $plantas = Planta::where('activa', true)->orderBy('nombre')->get();
@@ -186,23 +196,66 @@ class SolicitudController extends Controller
             }
         }
 
-        // Estado inicial y auto-aprobación
-        $estado = 'pendiente_origen';
-        $aprobadorOrigen = null;
-        $fechaAprobOrigen = null;
-        $aprobadorDestino = null;
+        // ============================================================
+        // ESTADO INICIAL Y AUTO-APROBACIÓN
+        // ============================================================
+        // Reglas (alineadas con AprobacionController::aprobarInt):
+        //
+        //   - Empleado normal (no aprobador): estado = 'pendiente_origen'.
+        //     Ningún aprobador se marca. La solicitud queda esperando a que
+        //     el Aprobador de la planta origen la revise.
+        //
+        //   - Aprobador (de la planta origen) crea la solicitud:
+        //     · Marca aprobador_origen + fecha.
+        //     · pase_salida  → estado='aprobado' (no hay destino que aprobar).
+        //     · interplantas → estado='pendiente_destino'. ⚠️ El Aprobador de
+        //       la planta DESTINO debe revisar — el creador NO puede auto-
+        //       aprobar el destino porque sería un bypass de seguridad
+        //       (un Aprobador de Jardín inyectando gente en Partidas sin
+        //       consentimiento del Aprobador de Partidas).
+        //
+        //   - Admin / Superadmin: SÍ pueden auto-aprobar ambos pasos (origen
+        //     y destino) porque son super-usuarios con poder total.
+        //     · pase_salida  → estado='aprobado'.
+        //     · interplantas → estado='aprobado' (marcan ambos aprobadores).
+        //
+        // ⚠️ FIX CRÍTICO C4 (auditoría V6):
+        //   Antes este bloque auto-aprobaba el destino SIEMPRE que el creador
+        //   fuera Aprobador+ (incluyendo Aprobadores comunes), así que un
+        //   Aprobador de planta A podía inyectar empleados en planta B sin
+        //   que el Aprobador de B consintiera. Eso rompía el control de
+        //   doble aprobación del SRS para interplantas.
+        //   Ahora separamos: solo Admin/Super auto-aprueban destino.
+
+        $estado            = 'pendiente_origen';
+        $aprobadorOrigen   = null;
+        $fechaAprobOrigen  = null;
+        $aprobadorDestino  = null;
         $fechaAprobDestino = null;
 
         if ($esAprobadorOSuperior) {
-            // Auto-aprobación: marca origen (y destino si es interplantas)
-            $estado = 'aprobado';
-            $aprobadorOrigen = $userId;
+            // Marca aprobación de origen (el creador siempre aprueba su planta)
+            $aprobadorOrigen  = $userId;
             $fechaAprobOrigen = $ahora;
-            if ($tipo === 'interplantas') {
-                $aprobadorDestino = $userId;
+
+            // ¿Es Admin/Super? → puede auto-aprobar el destino también.
+            $esSuperior = $user->isAdmin() || $user->isSuperadmin();
+
+            if ($tipo === 'pase_salida') {
+                // Pase de salida: solo requiere aprobación de origen.
+                $estado = 'aprobado';
+            } elseif ($esSuperior) {
+                // Admin/Super + interplantas: aprueba ambos pasos.
+                $aprobadorDestino  = $userId;
                 $fechaAprobDestino = $ahora;
+                $estado            = 'aprobado';
+            } else {
+                // Aprobador común + interplantas: solo aprueba origen.
+                // El Aprobador de la planta destino debe revisar después.
+                $estado = 'pendiente_destino';
             }
         }
+
 
         // FIX 3c: Cálculo automático de fechas para 'pase_salida'.
         // Para otros tipos (interplantas), se usan las fechas del form tal cual.
@@ -369,11 +422,21 @@ class SolicitudController extends Controller
             }
 
             // Insertar en solicitud_empleados
+            // FIX 3: En interplantas, si el creador es Aprobador (no Admin),
+            // el empleado queda 'aprobado_origen' (falta destino).
             foreach ($empleados as $empId) {
+                $estadoEmp = 'pendiente';
+                if ($esAprobadorOSuperior) {
+                    if ($tipo === 'interplantas' && !$user->isAdmin() && !$user->isSuperadmin()) {
+                        $estadoEmp = 'aprobado_origen';
+                    } else {
+                        $estadoEmp = 'aprobado';
+                    }
+                }
                 SolicitudEmpleado::create([
                     'id_solicitud_int' => $solicitud->id_solicitud_int,
                     'empleado_id'      => $empId,
-                    'estado'           => $esAprobadorOSuperior ? 'aprobado' : 'pendiente',
+                    'estado'           => $estadoEmp,
                 ]);
             }
         }
@@ -392,16 +455,51 @@ class SolicitudController extends Controller
             LogSistema::registrar('ERROR_NOTIF', 'Error al notificar: ' . $e->getMessage());
         }
 
+        // ============================================================
+        // CAMBIO V7: Enviar correo a aprobadores/admin/super al crear
+        // ============================================================
+        try {
+            $aprobadores = \App\Models\UsuarioSca::whereHas('rol', fn($q) => 
+                $q->whereIn('nombre', ['Aprobador', 'Admin', 'Superadmin'])
+            )->whereNull('fecha_baja')->get();
+
+            $creadorNombre = $user->nombre_completo;
+            $empleadosIds = $solicitud->empleados->map(fn($se) => $se->empleado_id)->toArray();
+            $nombresEmpleados = \App\Models\Sitec\Empleado::whereIn('id_empleado', $empleadosIds)->pluck('nombre_completo')->toArray();
+
+            foreach ($aprobadores as $aprobador) {
+                if ($aprobador->email_emp) {
+                    \Mail::to($aprobador->email_emp)->send(new \App\Mail\NotificacionSolicitudMail(
+                        $solicitud,
+                        $aprobador->nombre_completo,
+                        'Nueva solicitud creada - #' . $solicitud->id_solicitud_int,
+                        '🔔 Nueva Solicitud Pendiente',
+                        'Se ha creado una nueva solicitud que requiere su revisión.',
+                        null,
+                        null, // aprobados
+                        null, // rechazados
+                        $nombresEmpleados, // personas (neutral)
+                        $creadorNombre
+                    ));
+                }
+            }
+        } catch (\Exception $e) {
+            LogSistema::registrar('ERROR_NOTIF', 'Error al notificar nueva solicitud INT: ' . $e->getMessage());
+        }
+
+        // M2 [ScaModal] — Mensaje detallado de creación.
+        $mensaje = "<div class='text-start'>";
+        $mensaje .= "<div class='mb-2'><strong>Solicitud creada:</strong> #INT-{$solicitud->id_solicitud_int}</div>";
+        $mensaje .= "<div class='mb-2'><strong>Tipo:</strong> " . ($solicitud->tipo === 'pase_salida' ? 'Pase de salida' : 'Interplantas') . "</div>";
+        $mensaje .= "<div class='alert alert-info mt-2 mb-0 py-2'><i class='bi bi-info-circle-fill'></i> La solicitud fue enviada a aprobación. Recibirás una notificación cuando sea procesada.</div>";
+        $mensaje .= "</div>";
+
         return redirect()->route('solicitudes.show.int', $solicitud->id_solicitud_int)
-            ->with('success', 'Solicitud #' . $solicitud->id_solicitud_int . ' creada correctamente.');
+            ->with('sca_modal', sca_modal_flash('success', 'Solicitud creada', $mensaje));
     }
 
-        /**
+    /**
      * Crea una solicitud externa (visita o contratista).
-     *
-     * CAMBIO V5:
-     *   - La 'empresa' se guarda en la solicitud (no en cada externo).
-     *   - Los externos solo guardan datos personales (curp, nombre, telefono).
      */
     private function storeSolicitudExt(StoreSolicitudRequest $request, $user, string $tipo)
     {
@@ -426,7 +524,7 @@ class SolicitudController extends Controller
             $plantaDestinoId = $user->planta_id;
         }
 
-        // V5: empresa a nivel de solicitud (opcional para visita, obligatoria para contratista)
+        // V5: empresa a nivel de solicitud
         $empresa = $request->filled('empresa') ? $request->input('empresa') : null;
         if ($tipo === 'contratista' && empty($empresa)) {
             throw new \Exception('La empresa es obligatoria para contratistas.');
@@ -445,26 +543,27 @@ class SolicitudController extends Controller
 
         // ============================================================
         // FIX: Validar que los externos no tengan permisos vigentes solapados
-        // (validación por planta destino)
         // ============================================================
         $nuevaFechaInicio = \Carbon\Carbon::parse($request->fecha_inicio);
-        // Usar endOfDay() en fecha_fin por si la BD guarda solo DATE (sin hora)
         $nuevaFechaFin = \Carbon\Carbon::parse($request->fecha_fin)->endOfDay();
-        $nuevaPlantaId = $plantaDestinoId; // La planta destino de la solicitud NUEVA
+        $nuevaPlantaId = $plantaDestinoId;
         
         $externosInput = $request->input('externos', []);
         foreach ($externosInput as $extData) {
             $externoExistente = null;
-            
-            // Buscar si el externo ya existe por CURP o Pasaporte
-            if (!empty($extData['curp'])) {
-                $externoExistente = Externo::where('curp', strtoupper(trim($extData['curp'])))->first();
-            } elseif (!empty($extData['pasaporte'])) {
-                $externoExistente = Externo::where('pasaporte', strtoupper(trim($extData['pasaporte'])))->first();
+            $tipoId = strtolower(trim($extData['tipo_identificacion'] ?? ''));
+            $valorId = trim($extData['identificacion'] ?? '');
+            if ($tipoId === 'curp') {
+                $valorId = strtoupper($valorId);
+            }
+
+            if ($tipoId && $valorId) {
+                $externoExistente = Externo::where('tipo_identificacion', $tipoId)
+                    ->where('identificacion', $valorId)
+                    ->first();
             }
 
             if ($externoExistente) {
-                // Buscar solicitudes anteriores de este externo
                 $detallesAnteriores = \App\Models\SolicitudExternoDetalle::where('id_externos', $externoExistente->id_externos)
                     ->with('solicitudExt')
                     ->get();
@@ -473,16 +572,11 @@ class SolicitudController extends Controller
                     $solAnt = $detalleAnt->solicitudExt;
                     if (!$solAnt) continue;
 
-                    // Si la solicitud anterior está activa (no rechazada/cancelada)
                     if (in_array($solAnt->estado, ['pendiente', 'aprobado', 'aprobado_parcial'])) {
-                        
-                        // FIX: Solo bloquear si es para la MISMA planta destino
                         if ($solAnt->id_planta_destino == $nuevaPlantaId) {
                             $solAntInicio = \Carbon\Carbon::parse($solAnt->fecha_inicio);
                             $solAntFin = \Carbon\Carbon::parse($solAnt->fecha_fin)->endOfDay();
 
-                            // Verificar solapamiento de fechas:
-                            // Hay solapamiento si: inicio_nuevo < fin_anterior AND fin_nuevo > inicio_anterior
                             if ($nuevaFechaInicio < $solAntFin && $nuevaFechaFin > $solAntInicio) {
                                 throw new \Exception("El externo {$externoExistente->nombre_completo} ya tiene un permiso vigente (Solicitud #{$solAnt->id_solicitud_ext}) para esta planta en las fechas seleccionadas. Debe cancelar el permiso anterior o esperar a que expire.");
                             }
@@ -491,43 +585,43 @@ class SolicitudController extends Controller
                 }
             }
         }
-        // ============================================================
 
         // Crear la solicitud externa (con empresa)
         $solicitud = SolicitudExt::create([
             'creador_empleado_id'              => $userId,
             'tipo'                             => $tipoExterno,
             'anfitrion_empleado_id'            => $anfitrionId,
-            'empresa'                          => $empresa, // V5: Se guarda aquí
+            'empresa'                          => $empresa,
             'id_planta_destino'                => $plantaDestinoId,
             'fecha_inicio'                     => $request->fecha_inicio,
             'fecha_fin'                        => $request->fecha_fin,
             'motivo'                           => $request->motivo,
             'estado'                           => $estado,
-            'aprobador_destino_empleado_id'    => $aprobadorDestino,
+            'aprobador_destino_empleado_id'   => $aprobadorDestino,
             'fecha_aprobacion_destino'         => $fechaAprobDestino,
         ]);
 
-        // N+ externos: crear/buscar cada uno (solo datos personales) y vincular a la solicitud
+        // N+ externos: crear/buscar cada uno
         $externos = $request->input('externos', []);
         foreach ($externos as $extData) {
             $externo = Externo::buscarOcrear([
-                'curp'            => $extData['curp'] ?? null,
-                'pasaporte'       => $extData['pasaporte'] ?? null,
-                'nombre_completo' => $extData['nombre'],
-                'telefono'        => $extData['telefono'] ?? null,
+                'tipo_identificacion' => $extData['tipo_identificacion'] ?? null,
+                'identificacion'      => $extData['identificacion'] ?? null,
+                'nombre_completo'     => $extData['nombre'],
+                'telefono'            => $extData['telefono'] ?? null,
             ]);
 
-            // Crear el detalle con QR=NULL y estado_qr='cancelado'
             SolicitudExternoDetalle::create([
                 'id_solicitud_ext' => $solicitud->id_solicitud_ext,
                 'id_externos'      => $externo->id_externos,
                 'codigo_qr'        => null,
-                'estado_qr'        => 'cancelado',
+                'estado_qr'        => 'pendiente',
             ]);
         }
 
-        // Si fue auto-aprobada, generar QRs para todos los externos
+        // ============================================================
+        // AUTO-APROBACIÓN: Generar QRs y enviar correo si aplica
+        // ============================================================
         if ($estado === 'aprobado') {
             $prefijoQr = config('sca_qr.prefijo_qr_externo');
             foreach ($solicitud->externos as $detalle) {
@@ -535,12 +629,32 @@ class SolicitudController extends Controller
                 $detalle->estado_qr = 'autorizado';
                 $detalle->save();
             }
+
+            // FIX V7: enviar credenciales por correo al creador (auto-aprobación)
+            try {
+                $usuarioCreador = \App\Models\UsuarioSca::where('username', (string) $userId)->first();
+                if ($usuarioCreador && $usuarioCreador->email_emp) {
+                    $autorizados = $solicitud->externos->filter(function($d) {
+                        return $d->estado_qr === 'autorizado' && $d->codigo_qr;
+                    })->count();
+
+                    if ($autorizados > 0) {
+                        \Mail::to($usuarioCreador->email_emp)
+                            ->send(new \App\Mail\CredencialExternoMail(
+                                $solicitud,
+                                $usuarioCreador->nombre_completo
+                            ));
+                    }
+                }
+            } catch (\Exception $e) {
+                LogSistema::registrar('ERROR_NOTIF', 'Error al enviar credenciales por correo: ' . $e->getMessage());
+            }
         }
 
         DB::commit();
         LogSistema::registrar('CREAR_SOLICITUD', "Solicitud EXT #{$solicitud->id_solicitud_ext} tipo={$tipoExterno} estado={$estado}");
 
-        // Notificaciones (defensivo)
+        // Notificaciones (defensivo: si fallan, no rompen la creación)
         try {
             if ($estado === 'aprobado' && $esAprobadorOSuperior) {
                 \App\Services\NotificacionService::solicitudCreadaYAutoAprobada($solicitud, $user);
@@ -551,8 +665,46 @@ class SolicitudController extends Controller
             LogSistema::registrar('ERROR_NOTIF', 'Error al notificar: ' . $e->getMessage());
         }
 
+        // ============================================================
+        // CAMBIO V7: Enviar correo a aprobadores/admin/super al crear
+        // ============================================================
+        try {
+            $aprobadores = \App\Models\UsuarioSca::whereHas('rol', fn($q) => 
+                $q->whereIn('nombre', ['Aprobador', 'Admin', 'Superadmin'])
+            )->whereNull('fecha_baja')->get();
+
+            $creadorNombre = $user->nombre_completo;
+            $nombresExternos = $solicitud->externos->map(fn($d) => $d->externo?->nombre_completo ?? 'N/A')->toArray();
+
+            foreach ($aprobadores as $aprobador) {
+                if ($aprobador->email_emp) {
+                    \Mail::to($aprobador->email_emp)->send(new \App\Mail\NotificacionSolicitudMail(
+                        $solicitud,
+                        $aprobador->nombre_completo,
+                        'Nueva solicitud creada - #' . $solicitud->id_solicitud_ext,
+                        '🔔 Nueva Solicitud Pendiente',
+                        'Se ha creado una nueva solicitud que requiere su revisión.',
+                        null,
+                        null, // aprobados
+                        null, // rechazados
+                        $nombresExternos, // personas (neutral)
+                        $creadorNombre
+                    ));
+                }
+            }
+        } catch (\Exception $e) {
+            LogSistema::registrar('ERROR_NOTIF', 'Error al notificar nueva solicitud EXT: ' . $e->getMessage());
+        }
+
+        // M2 [ScaModal] — Mensaje detallado de creación.
+        $mensaje = "<div class='text-start'>";
+        $mensaje .= "<div class='mb-2'><strong>Solicitud creada:</strong> #EXT-{$solicitud->id_solicitud_ext}</div>";
+        $mensaje .= "<div class='mb-2'><strong>Tipo:</strong> " . ($solicitud->tipo === 'visita' ? 'Visita' : 'Contratista') . "</div>";
+        $mensaje .= "<div class='alert alert-info mt-2 mb-0 py-2'><i class='bi bi-info-circle-fill'></i> La solicitud fue enviada a aprobación. Recibirás una notificación cuando sea procesada.</div>";
+        $mensaje .= "</div>";
+
         return redirect()->route('solicitudes.show.ext', $solicitud->id_solicitud_ext)
-            ->with('success', 'Solicitud #' . $solicitud->id_solicitud_ext . ' creada correctamente.');
+            ->with('sca_modal', sca_modal_flash('success', 'Solicitud creada', $mensaje));
     }
 
     // ============================================================
@@ -664,116 +816,206 @@ class SolicitudController extends Controller
         $user = $request->user();
         $esSuperior = $user->isAdmin() || $user->isSuperadmin();
 
-        // Permiso: solo el creador o Admin/Superadmin
-        if (!$esSuperior && $solicitud->creador_empleado_id !== (int) $user->username) {
-            abort(403, 'No puede cancelar esta solicitud.');
+        // Permiso: el creador, o Admin/Superadmin, o Aprobador de la planta
+        if (!$esSuperior 
+            && $solicitud->creador_empleado_id !== (int) $user->username
+            && !($user->isAprobador() && ($solicitud->id_planta_origen === $user->planta_id || $solicitud->id_planta_destino === $user->planta_id))
+        ) {
+            abort(403, 'No tiene permisos para cancelar esta solicitud.');
         }
 
-        // V5: permitir cancelar en cualquier estado (incluso aprobado)
-        // Solo NO se puede cancelar si ya está rechazada/cancelada
         if ($solicitud->estado === 'rechazado') {
             return back()->withErrors(['error' => 'Esta solicitud ya fue cancelada/rechazada.']);
         }
 
-        $solicitud->update([
-            'estado'        => 'rechazado',
-            'motivo_rechazo'=> 'Cancelada por ' . $user->nombre_completo,
-        ]);
+        $solicitud->estado = 'rechazado';
+        $solicitud->motivo_rechazo = $request->motivo_rechazo ?? 'Cancelada por el creador';
+        $solicitud->save();
 
-        // Si era grupal, marcar todos los empleados como rechazados
-        if ($solicitud->empleados()->exists()) {
-            \App\Models\SolicitudEmpleado::where('id_solicitud_int', $solicitud->id_solicitud_int)
+        // Si era grupal, marcar todos como rechazados
+        if ($solicitud->esGrupal()) {
+            SolicitudEmpleado::where('id_solicitud_int', $solicitud->id_solicitud_int)
                 ->update(['estado' => 'rechazado']);
         }
 
         LogSistema::registrar('CANCELAR_SOLICITUD', "Solicitud INT #{$solicitud->id_solicitud_int} cancelada por {$user->username}");
 
+        // ============================================================
+        // CAMBIO V7: Enviar correo al creador con lista de afectados
+        // ============================================================
+        try {
+            $usuarioCreador = \App\Models\UsuarioSca::where('username', (string) $solicitud->creador_empleado_id)->first();
+            if ($usuarioCreador && $usuarioCreador->email_emp) {
+                // Listar todos los empleados afectados
+                $empleadosIds = $solicitud->empleados->map(fn($se) => $se->empleado_id)->toArray();
+                $nombresAfectados = \App\Models\Sitec\Empleado::whereIn('id_empleado', $empleadosIds)
+                    ->pluck('nombre_completo')->toArray();
+                
+                // Si no hay empleados (individual), el afectado es el creador
+                if (empty($nombresAfectados)) {
+                    $creadorEmp = \App\Models\Sitec\Empleado::find($solicitud->creador_empleado_id);
+                    $nombresAfectados = [$creadorEmp?->nombre_completo ?? 'Empleado'];
+                }
+
+                \Mail::to($usuarioCreador->email_emp)->send(new \App\Mail\NotificacionSolicitudMail(
+                    $solicitud,
+                    $usuarioCreador->nombre_completo,
+                    'Solicitud cancelada - #' . $solicitud->id_solicitud_int,
+                    '❌ Solicitud Cancelada',
+                    'Tu solicitud ha sido cancelada. Se cancelaron los permisos de ' . count($nombresAfectados) . ' persona(s).',
+                    $request->motivo_rechazo ?? 'Cancelada por el usuario',
+                    null,               // aprobados
+                    $nombresAfectados,  // rechazados (todos los afectados)
+                    null,               // personas
+                    null                // creadorNombre
+                ));
+            }
+        } catch (\Exception $e) {
+            LogSistema::registrar('ERROR_NOTIF', 'Error al enviar correo de cancelación: ' . $e->getMessage());
+        }
+
+        // M2 [ScaModal] — Mensaje detallado de cancelación.
+        $mensaje = "<div class='text-start'>";
+        $mensaje .= "<div class='mb-2'><strong>Solicitud cancelada:</strong> #INT-{$solicitud->id_solicitud_int}</div>";
+        $mensaje .= "<div class='alert alert-warning mt-2 mb-0 py-2'><i class='bi bi-exclamation-triangle-fill'></i> La solicitud fue cancelada por <strong>{$user->nombre_completo}</strong>. Los accesos asociados quedan invalidados.</div>";
+        $mensaje .= "</div>";
+
+        // M2: Setear flash en sesión ANTES de devolver JSON (Option E)
+        session()->flash('sca_modal', sca_modal_flash('success', 'Solicitud cancelada', $mensaje));
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => true,
+                'titulo' => 'Solicitud cancelada',
+                'mensaje' => $mensaje,
+                'redirect' => route('solicitudes.hub'),
+            ]);
+        }
+
         return redirect()->route('solicitudes.hub')
-            ->with('success', "Solicitud #{$solicitud->id_solicitud_int} cancelada.");
+            ->with('sca_modal', sca_modal_flash('success', 'Solicitud cancelada', $mensaje));
     }
 
+
+
     /**
-     * FIX A-8: Cancela un empleado específico de una solicitud grupal.
+     * Cancela un empleado específico de una solicitud grupal interna.
      * Ruta: POST /solicitudes/int/{solicitud}/cancel-empleado
      *
-     * Lógica:
-     *   - Solo el creador o Admin/Super pueden cancelar.
-     *   - Marca el SolicitudEmpleado como 'rechazado'.
-     *   - Si TODOS los empleados quedan rechazados, la solicitud completa
-     *     pasa a 'rechazado' (cancelada).
-     *   - No se puede cancelar al creador (él debe cancelar la solicitud completa).
+     * Body:
+     *   - empleado_id: int
+     *   - motivo_cancelacion: string (viene del modal JS)
+     *
+     * CAMBIO V7: guarda el motivo y envía correo al creador.
      */
     public function cancelEmpleadoInt(SolicitudInt $solicitud, Request $request)
     {
+        $user = $request->user();
         $request->validate([
-            'empleado_id' => ['required', 'integer'],
+            'empleado_id' => 'required|integer',
+            'motivo_cancelacion' => 'required|string|max:500',
         ]);
 
-        $user = $request->user();
-        $esSuperior = $user->isAdmin() || $user->isSuperadmin();
-        $empleadoId = (int) $request->empleado_id;
+        $empleadoId = $request->empleado_id;
+        $motivo = $request->motivo_cancelacion;
 
-        // Permiso: solo el creador o Admin/Superadmin
-        if (!$esSuperior && $solicitud->creador_empleado_id !== (int) $user->username) {
-            return back()->withErrors(['error' => 'No puede cancelar empleados de esta solicitud.']);
-        }
-
-        // No se puede cancelar al creador (él debe cancelar la solicitud completa)
-        if ($solicitud->creador_empleado_id === $empleadoId) {
-            return back()->withErrors(['error' => 'No puede cancelar al creador de la solicitud. Si desea cancelarla completamente, use el botón "Cancelar Solicitud".']);
-        }
-
-        // Verificar que el empleado esté en la solicitud
-        $detalle = \App\Models\SolicitudEmpleado::where('id_solicitud_int', $solicitud->id_solicitud_int)
+        $se = SolicitudEmpleado::where('id_solicitud_int', $solicitud->id_solicitud_int)
             ->where('empleado_id', $empleadoId)
             ->first();
 
-        if (!$detalle) {
-            return back()->withErrors(['error' => 'El empleado no está en esta solicitud.']);
+        if (!$se) {
+            return back()->withErrors(['error' => 'Empleado no encontrado en esta solicitud.']);
         }
 
-        // No se puede cancelar si ya está rechazado
-        if ($detalle->estado === 'rechazado') {
-            return back()->withErrors(['error' => 'Este empleado ya fue cancelado.']);
+        if ($se->estado === 'rechazado') {
+            return back()->withErrors(['error' => 'Este empleado ya fue rechazado.']);
         }
 
-        // Marcar el empleado como rechazado
-        $empleado = Empleado::find($empleadoId);
-        $detalle->update(['estado' => 'rechazado']);
+        $se->estado = 'rechazado';
+        $se->save();
 
-        LogSistema::registrar(
-            'CANCELAR_EMPLEADO_SOLICITUD',
-            "Empleado {$empleadoId} ({$empleado?->nombre_completo}) cancelado de la solicitud INT #{$solicitud->id_solicitud_int} por {$user->username}"
-        );
+        // CAMBIO V7: Verificar si quedan aprobados
+        $quedanAprobados = SolicitudEmpleado::where('id_solicitud_int', $solicitud->id_solicitud_int)
+            ->where('estado', 'aprobado')
+            ->exists();
 
-        // Verificar si TODOS los empleados (excluyendo al creador) están rechazados
-        $empleadosActivos = \App\Models\SolicitudEmpleado::where('id_solicitud_int', $solicitud->id_solicitud_int)
-            ->where('estado', '!=', 'rechazado')
-            ->count();
-
-        if ($empleadosActivos === 0) {
-            // Todos cancelados → la solicitud completa se cancela
-            $solicitud->update([
-                'estado' => 'rechazado',
-                'motivo_rechazo' => 'Todos los empleados fueron cancelados por ' . $user->nombre_completo,
-            ]);
-            return redirect()->route('solicitudes.show.int', $solicitud->id_solicitud_int)
-                ->with('warning', "Empleado {$empleado?->nombre_completo} cancelado. Como no quedan más empleados, la solicitud completa fue cancelada.");
+        $estadoAnterior = $solicitud->estado;
+        
+        if (!$quedanAprobados && in_array($solicitud->estado, ['aprobado', 'aprobado_parcial'])) {
+            // Si no quedan aprobados, la solicitud se rechaza
+            $solicitud->estado = 'rechazado';
+            $solicitud->motivo_rechazo = 'Todos los empleados fueron cancelados. Último motivo: ' . $motivo;
+            $solicitud->save();
+        } elseif ($solicitud->estado === 'aprobado') {
+            // Si quedan aprobados pero se canceló uno, pasa a parcial
+            $solicitud->estado = 'aprobado_parcial';
+            $solicitud->motivo_rechazo = 'Empleado cancelado: ' . $motivo;
+            $solicitud->save();
         }
 
-        // FIX 2d: Si la solicitud estaba 'aprobado' y cancelamos a un empleado,
-        // pasarla a 'aprobado_parcial' para que quede claro que ya no es completa.
-        // Si estaba pendiente_origen/pendiente_destino, la dejamos igual (sigue pendiente).
-        if ($solicitud->estado === 'aprobado') {
-            $solicitud->update([
-                'estado' => 'aprobado_parcial',
-                'motivo_rechazo' => 'Un empleado fue cancelado por ' . $user->nombre_completo . '. Solicitud parcial.',
-            ]);
+        // Enviar correo al creador
+        try {
+            $usuarioCreador = \App\Models\UsuarioSca::where('username', (string) $solicitud->creador_empleado_id)->first();
+            if ($usuarioCreador && $usuarioCreador->email_emp) {
+                $empleado = \App\Models\Sitec\Empleado::find($empleadoId);
+                $nombreEmp = $empleado?->nombre_completo ?? 'Empleado #' . $empleadoId;
+
+                \Mail::to($usuarioCreador->email_emp)->send(new \App\Mail\NotificacionSolicitudMail(
+                    $solicitud,
+                    $usuarioCreador->nombre_completo,
+                    'Permiso cancelado - ' . $nombreEmp,
+                    '❌ Permiso Cancelado',
+                    "Se ha cancelado el permiso de {$nombreEmp} en la solicitud #{$solicitud->id_solicitud_int}.",
+                    $motivo,
+                    null, // aprobados
+                    [$nombreEmp], // rechazados
+                    null, // personas
+                    null
+                ));
+            }
+        } catch (\Exception $e) {
+            LogSistema::registrar('ERROR_NOTIF', 'Error al enviar correo de cancelación individual: ' . $e->getMessage());
         }
 
-        return redirect()->route('solicitudes.show.int', $solicitud->id_solicitud_int)
-            ->with('success', "Empleado {$empleado?->nombre_completo} cancelado de la solicitud.");
+        LogSistema::registrar('CANCELAR_EMPLEADO', "Empleado {$empleadoId} cancelado de solicitud INT #{$solicitud->id_solicitud_int} por {$user->username}");
+
+        // M2 [ScaModal] — Forzar el nombre del empleado desde sitec.
+        $empleadoSitec = \App\Models\Sitec\Empleado::on('sitec')->find($empleadoId);
+        $nombreEmp = $empleadoSitec?->nombre_completo ?? "Empleado #{$empleadoId}";
+
+        if ($solicitud->estado === 'rechazado') {
+            // Caso total: no quedan más aprobados → solicitud cancelada
+            $mensaje = "<div class='text-start'>";
+            $mensaje .= "<div class='mb-2'><strong>Empleado cancelado:</strong> {$nombreEmp}</div>";
+            $mensaje .= "<div class='alert alert-warning mt-2 mb-0 py-2'><i class='bi bi-exclamation-triangle-fill'></i> Como no quedan más empleados aprobados, <strong>la solicitud #INT-{$solicitud->id_solicitud_int} fue cancelada completamente</strong>.</div>";
+            $mensaje .= "</div>";
+            
+            // M2: Setear flash en sesión ANTES de devolver JSON (Option E)
+            session()->flash('sca_modal', sca_modal_flash('warning', 'Solicitud cancelada', $mensaje));
+            if ($request->expectsJson()) {
+                return response()->json(['success' => true, 'redirect' => route('solicitudes.show.int', $solicitud->id_solicitud_int)]);
+            }
+            
+            return back()->with('sca_modal', sca_modal_flash('warning', 'Solicitud cancelada', $mensaje));
+        } else {
+            // Caso parcial: quedan más aprobados
+            $mensaje = "<div class='text-start'>";
+            $mensaje .= "<div class='mb-2'><strong>Empleado cancelado:</strong> {$nombreEmp}</div>";
+            $mensaje .= "<div class='mb-2'><strong>Solicitud:</strong> #INT-{$solicitud->id_solicitud_int}</div>";
+            if ($solicitud->estado === 'aprobado_parcial') {
+                $mensaje .= "<div class='alert alert-warning mt-2 mb-0 py-2'><i class='bi bi-info-circle-fill'></i> La solicitud pasó a estado <strong>Aprobada parcialmente</strong>.</div>";
+            }
+            $mensaje .= "</div>";
+            
+            // M2: Setear flash en sesión ANTES de devolver JSON (Option E)
+            session()->flash('sca_modal', sca_modal_flash('success', 'Empleado cancelado', $mensaje));
+            if ($request->expectsJson()) {
+                return response()->json(['success' => true, 'redirect' => route('solicitudes.show.int', $solicitud->id_solicitud_int)]);
+            }
+            
+            return back()->with('sca_modal', sca_modal_flash('success', 'Empleado cancelado', $mensaje));
+        }
     }
+    
 
     /**
      * Cancela una solicitud externa (sin importar su estado actual).
@@ -799,10 +1041,9 @@ class SolicitudController extends Controller
             return back()->withErrors(['error' => 'Esta solicitud ya fue cancelada/rechazada.']);
         }
 
-        $solicitud->update([
-            'estado'        => 'rechazado',
-            'motivo_rechazo'=> 'Cancelada por ' . $user->nombre_completo,
-        ]);
+        $solicitud->estado = 'rechazado';
+        $solicitud->motivo_rechazo = $request->motivo_rechazo ?? 'Cancelada por el creador';
+        $solicitud->save();
 
         // V5: Invalidar TODOS los QRs de los externos (ya no pueden entrar)
         foreach ($solicitud->externos as $detalle) {
@@ -812,78 +1053,159 @@ class SolicitudController extends Controller
 
         LogSistema::registrar('CANCELAR_SOLICITUD', "Solicitud EXT #{$solicitud->id_solicitud_ext} cancelada por {$user->username}. QRs invalidados.");
 
+        // ============================================================
+        // CAMBIO V7: Enviar correo al creador con lista de afectados
+        // ============================================================
+        try {
+            $usuarioCreador = \App\Models\UsuarioSca::where('username', (string) $solicitud->creador_empleado_id)->first();
+            if ($usuarioCreador && $usuarioCreador->email_emp) {
+                // Listar todos los externos afectados
+                $nombresAfectados = $solicitud->externos->map(fn($d) => $d->externo?->nombre_completo ?? 'Externo')->toArray();
+
+                \Mail::to($usuarioCreador->email_emp)->send(new \App\Mail\NotificacionSolicitudMail(
+                    $solicitud,
+                    $usuarioCreador->nombre_completo,
+                    'Solicitud cancelada - #' . $solicitud->id_solicitud_ext,
+                    '❌ Solicitud Cancelada',
+                    'Tu solicitud ha sido cancelada. Se cancelaron los permisos de ' . count($nombresAfectados) . ' persona(s).',
+                    $request->motivo_rechazo ?? 'Cancelada por el usuario',
+                    null,               // aprobados
+                    $nombresAfectados,  // rechazados (todos los afectados)
+                    null,               // personas
+                    null                // creadorNombre
+                ));
+            }
+        } catch (\Exception $e) {
+            LogSistema::registrar('ERROR_NOTIF', 'Error al enviar correo de cancelación: ' . $e->getMessage());
+        }
+
+        // M2 [ScaModal] — Mensaje detallado de cancelación EXT.
+        $mensaje = "<div class='text-start'>";
+        $mensaje .= "<div class='mb-2'><strong>Solicitud cancelada:</strong> #EXT-{$solicitud->id_solicitud_ext}</div>";
+        $mensaje .= "<div class='alert alert-warning mt-2 mb-0 py-2'><i class='bi bi-qr-code'></i> Los QRs de acceso han sido invalidados. Los externos ya no podrán ingresar.</div>";
+        $mensaje .= "</div>";
+
+        // M2: Setear flash en sesión ANTES de devolver JSON (Option E)
+        session()->flash('sca_modal', sca_modal_flash('success', 'Solicitud cancelada', $mensaje));
+        if ($request->expectsJson()) {
+            return response()->json(['success' => true, 'redirect' => route('solicitudes.hub')]);
+        }
+
         return redirect()->route('solicitudes.hub')
-            ->with('success', "Solicitud #{$solicitud->id_solicitud_ext} cancelada. Los QRs de acceso han sido invalidados.");
+            ->with('sca_modal', sca_modal_flash('success', 'Solicitud cancelada', $mensaje));
     }
 
-        /**
-     * FIX M-1: Cancela un externo específico de una solicitud grupal.
+    /**
+     * Cancela un externo específico de una solicitud externa.
      * Ruta: POST /solicitudes/ext/{solicitud}/cancel-externo
+     *
+     * Body:
+     *   - id_solicitud_externo_detalle: int
+     *   - motivo_cancelacion: string (viene del modal JS)
+     *
+     * CAMBIO V7: guarda el motivo y envía correo al creador.
      */
     public function cancelExternoIndividual(SolicitudExt $solicitud, Request $request)
     {
+        $user = $request->user();
         $request->validate([
-            'id_solicitud_externo_detalle' => ['required', 'integer'],
+            'id_solicitud_externo_detalle' => 'required|integer',
+            'motivo_cancelacion' => 'required|string|max:500',
         ]);
 
-        $user = $request->user();
-        $esSuperior = $user->isAdmin() || $user->isSuperadmin();
-
-        // Permiso: solo el creador o Admin/Superadmin
-        if (!$esSuperior && $solicitud->creador_empleado_id !== (int) $user->username) {
-            return back()->withErrors(['error' => 'No puede cancelar externos de esta solicitud.']);
-        }
-
-        $detalleId = (int) $request->id_solicitud_externo_detalle;
+        $detalleId = $request->id_solicitud_externo_detalle;
+        $motivo = $request->motivo_cancelacion;
 
         $detalle = \App\Models\SolicitudExternoDetalle::where('id_solicitud_ext', $solicitud->id_solicitud_ext)
             ->where('id_solicitud_externo_detalle', $detalleId)
             ->first();
 
         if (!$detalle) {
-            return back()->withErrors(['error' => 'El externo no está en esta solicitud.']);
+            return back()->withErrors(['error' => 'Externo no encontrado en esta solicitud.']);
         }
 
         if ($detalle->estado_qr === 'cancelado') {
             return back()->withErrors(['error' => 'Este externo ya fue cancelado.']);
         }
 
-        // Marcar el externo como cancelado y anular su QR
         $detalle->estado_qr = 'cancelado';
         $detalle->codigo_qr = null;
         $detalle->save();
 
-        $externo = $detalle->externo;
-        LogSistema::registrar(
-            'CANCELAR_EXTERNO_SOLICITUD',
-            "Externo {$externo?->nombre_completo} cancelado de la solicitud EXT #{$solicitud->id_solicitud_ext} por {$user->username}"
-        );
-
-        // Verificar si TODOS los externos están cancelados
-        $activos = \App\Models\SolicitudExternoDetalle::where('id_solicitud_ext', $solicitud->id_solicitud_ext)
+        // CAMBIO V7: Verificar si quedan autorizados
+        $quedanAutorizados = \App\Models\SolicitudExternoDetalle::where('id_solicitud_ext', $solicitud->id_solicitud_ext)
             ->where('estado_qr', 'autorizado')
-            ->count();
+            ->exists();
 
-        if ($activos === 0) {
-            // Todos cancelados → la solicitud completa se cancela
-            $solicitud->update([
-                'estado' => 'rechazado',
-                'motivo_rechazo' => 'Todos los externos fueron cancelados por ' . $user->nombre_completo,
-            ]);
-            return redirect()->route('solicitudes.show.ext', $solicitud->id_solicitud_ext)
-                ->with('warning', "Externo cancelado. Como no quedan más personas, la solicitud completa fue cancelada.");
+        if (!$quedanAutorizados && in_array($solicitud->estado, ['aprobado', 'aprobado_parcial'])) {
+            $solicitud->estado = 'rechazado';
+            $solicitud->motivo_rechazo = 'Todos los externos fueron cancelados. Último motivo: ' . $motivo;
+            $solicitud->save();
+        } elseif ($solicitud->estado === 'aprobado') {
+            $solicitud->estado = 'aprobado_parcial';
+            $solicitud->motivo_rechazo = 'Externo cancelado: ' . $motivo;
+            $solicitud->save();
         }
 
-        // Si la solicitud estaba 'aprobado' y cancelamos a uno, pasarla a 'aprobado_parcial'
-        if ($solicitud->estado === 'aprobado') {
-            $solicitud->update([
-                'estado' => 'aprobado_parcial',
-                'motivo_rechazo' => 'Un externo fue cancelado por ' . $user->nombre_completo . '. Solicitud parcial.',
-            ]);
+        // Enviar correo al creador
+        try {
+            $usuarioCreador = \App\Models\UsuarioSca::where('username', (string) $solicitud->creador_empleado_id)->first();
+            if ($usuarioCreador && $usuarioCreador->email_emp) {
+                $externo = $detalle->externo;
+                $nombreExt = $externo?->nombre_completo ?? 'Externo';
+
+                \Mail::to($usuarioCreador->email_emp)->send(new \App\Mail\NotificacionSolicitudMail(
+                    $solicitud,
+                    $usuarioCreador->nombre_completo,
+                    'Permiso cancelado - ' . $nombreExt,
+                    '❌ Permiso Cancelado',
+                    "Se ha cancelado el permiso de {$nombreExt} en la solicitud #{$solicitud->id_solicitud_ext}.",
+                    $motivo,
+                    null, // aprobados
+                    [$nombreExt], // rechazados
+                    null, // personas
+                    null
+                ));
+            }
+        } catch (\Exception $e) {
+            LogSistema::registrar('ERROR_NOTIF', 'Error al enviar correo de cancelación individual: ' . $e->getMessage());
         }
 
-        return redirect()->route('solicitudes.show.ext', $solicitud->id_solicitud_ext)
-            ->with('success', "Externo {$externo?->nombre_completo} cancelado de la solicitud.");
+        LogSistema::registrar('CANCELAR_EXTERNO', "Externo {$detalleId} cancelado de solicitud EXT #{$solicitud->id_solicitud_ext} por {$user->username}");
+
+        // M2 [ScaModal] — Mensaje detallado. Si la solicitud quedó rechazada (no quedan autorizados),
+        // mostramos warning; si quedó aprobado_parcial, mostramos success con aviso.
+        $externo = $detalle->externo;
+        $nombreExt = $externo?->nombre_completo ?? "Externo #{$detalleId}";
+
+        if ($solicitud->estado === 'rechazado') {
+            // Caso total: no quedan más autorizados → solicitud cancelada
+            $mensaje = "<div class='text-start'>";
+            $mensaje .= "<div class='mb-2'><strong>Externo cancelado:</strong> {$nombreExt}</div>";
+            $mensaje .= "<div class='alert alert-warning mt-2 mb-0 py-2'><i class='bi bi-exclamation-triangle-fill'></i> Como no quedan más personas autorizadas, <strong>la solicitud #EXT-{$solicitud->id_solicitud_ext} fue cancelada completamente</strong>.</div>";
+            $mensaje .= "</div>";
+            // M2: Setear flash en sesión ANTES de devolver JSON (Option E)
+            session()->flash('sca_modal', sca_modal_flash('warning', 'Solicitud cancelada', $mensaje));
+            if ($request->expectsJson()) {
+                return response()->json(['success' => true, 'redirect' => route('solicitudes.show.ext', $solicitud->id_solicitud_ext)]);
+            }
+            return back()->with('sca_modal', sca_modal_flash('warning', 'Solicitud cancelada', $mensaje));
+        } else {
+            // Caso parcial: quedan más autorizados
+            $mensaje = "<div class='text-start'>";
+            $mensaje .= "<div class='mb-2'><strong>Externo cancelado:</strong> {$nombreExt}</div>";
+            $mensaje .= "<div class='mb-2'><strong>Solicitud:</strong> #EXT-{$solicitud->id_solicitud_ext}</div>";
+            if ($solicitud->estado === 'aprobado_parcial') {
+                $mensaje .= "<div class='alert alert-warning mt-2 mb-0 py-2'><i class='bi bi-info-circle-fill'></i> La solicitud pasó a estado <strong>Aprobada parcialmente</strong>.</div>";
+            }
+            $mensaje .= "</div>";
+            // M2: Setear flash en sesión ANTES de devolver JSON (Option E)
+            session()->flash('sca_modal', sca_modal_flash('success', 'Externo cancelado', $mensaje));
+            if ($request->expectsJson()) {
+                return response()->json(['success' => true, 'redirect' => route('solicitudes.show.ext', $solicitud->id_solicitud_ext)]);
+            }
+            return back()->with('sca_modal', sca_modal_flash('success', 'Externo cancelado', $mensaje));
+        }
     }
 
     // ============================================================
@@ -904,17 +1226,32 @@ class SolicitudController extends Controller
         $user = request()->user();
         $plantaId = $user->planta_id;
 
-        // Internos pendientes en origen
+        // CAMBIO V7: filtrar también por fecha_fin >= now() para que las
+        // solicitudes vencidas no aparezcan en la bandeja (aunque su
+        // estado en BD todavía diga 'pendiente*' porque nadie las consultó).
+        // El accessor estado_actual las expirará cuando alguien las consulte,
+        // pero no queremos que se muestren como "pendientes" en la bandeja.
+
+        // FIX 7: Incluir 'aprobado_parcial' en las queries de origen y destino.
+        // - Para ORIGEN: mostramos las aprobado_parcial donde origen aún no aprobó (fecha_aprobacion_origen IS NULL).
+        // - Para DESTINO: mostramos las aprobado_parcial donde destino aún no aprobó (fecha_aprobacion_destino IS NULL).
+
+        // Internos pendientes en origen (y no vencidos)
         $queryOrigen = SolicitudInt::with(['plantaOrigen', 'plantaDestino', 'creador'])
-            ->where('estado', 'pendiente_origen');
+            ->whereIn('estado', ['pendiente_origen', 'aprobado_parcial'])
+            ->whereNull('fecha_aprobacion_origen')
+            ->where('fecha_fin', '>=', now());
 
-        // Internos pendientes en destino
+        // Internos pendientes en destino (y no vencidos)
         $queryDestino = SolicitudInt::with(['plantaOrigen', 'plantaDestino', 'creador'])
-            ->where('estado', 'pendiente_destino');
+            ->whereIn('estado', ['pendiente_destino', 'aprobado_parcial'])
+            ->whereNull('fecha_aprobacion_destino')
+            ->where('fecha_fin', '>=', now());
 
-        // Externos pendientes
+        // Externos pendientes (y no vencidos)
         $queryExt = SolicitudExt::with(['plantaDestino', 'creador', 'anfitrion', 'externos.externo'])
-            ->where('estado', 'pendiente');
+            ->where('estado', 'pendiente')
+            ->where('fecha_fin', '>=', now());
 
         // Scoping por rol
         if ($user->isAprobador()) {
@@ -980,11 +1317,11 @@ class SolicitudController extends Controller
 
         // Query para solicitudes internas resueltas
         $queryInt = SolicitudInt::with(['plantaOrigen', 'plantaDestino', 'creador', 'aprobadorOrigen', 'aprobadorDestino'])
-            ->whereIn('estado', ['aprobado', 'rechazado']);
+            ->whereIn('estado', ['aprobado', 'rechazado', 'aprobado_parcial', 'expirado']);
 
         // Query para solicitudes externas resueltas
         $queryExt = SolicitudExt::with(['plantaDestino', 'creador', 'anfitrion', 'aprobadorDestino', 'externos.externo'])
-            ->whereIn('estado', ['aprobado', 'rechazado']);
+            ->whereIn('estado', ['aprobado', 'rechazado', 'aprobado_parcial', 'expirado']);
 
         // Filtros
         if ($request->filled('tipo')) {
@@ -1169,7 +1506,14 @@ class SolicitudController extends Controller
             }
             $motivoRestriccion = 'Solo puede seleccionar empleados de su planta asignada: ' . $user->planta_nombre;
         } elseif ($user->isAdmin() || $user->isSuperadmin()) {
-            // Admin/Super: filtran por la planta_origen_id seleccionada en el form
+            // Admin/Super: filtran por la planta_origen_id seleccionada en el form.
+            // FIX V7: el mensaje viejo decía "Anfitrión filtrado por la planta
+            // destino" lo cual era incorrecto (anfitrión es para externas, y la
+            // planta es origen, no destino). Además, se mostraba SIEMPRE aunque
+            // hubiera resultados. Ahora no seteamos motivoRestriccion para
+            // Admin/Super: ellos pueden buscar en cualquier planta, no hay
+            // restricción que informar. El JS ya muestra un mensaje simple
+            // cuando no hay resultados.
             $plantaInput = $request->query('planta_id');
             if (!$plantaInput) {
                 return response()->json([
@@ -1180,23 +1524,35 @@ class SolicitudController extends Controller
                 ]);
             }
             $plantaFiltrada = (int) $plantaInput;
-            $motivoRestriccion = 'Anfitrión filtrado por la planta destino seleccionada: ' .
-                \App\Services\PlantaCacheService::nombrePlanta($plantaFiltrada);
+            // No seteamos $motivoRestriccion: no hay restricción para Admin/Super.
         }
 
-        // Cargar candidatos (con margen amplio para filtrar por planta en PHP)
-        $candidatos = $query->with(['puesto', 'departamento'])
-            ->limit(50)
-            ->get();
-
-        // Filtrar por planta derivada
+        // FIX: Filtrar por planta directamente en la query de la BD (más eficiente)
+        // y sacar el limit(50) y take(10) para que muestre TODOS los resultados.
         if ($plantaFiltrada !== null) {
-            $candidatos = $candidatos->filter(function ($e) use ($plantaFiltrada) {
-                return $e->plantaId() === $plantaFiltrada;
-            })->values(); // FIX: Reiniciar índices para que JSON sea un array, no un objeto
+            // Obtener los IDs de empleados que pertenecen a esta planta
+            $idsPlanta = \App\Models\EmpleadoExtSca::where('id_planta', $plantaFiltrada)
+                ->where('planta_forzada', false)
+                ->pluck('empleado_id')
+                ->toArray();
+            
+            // Si no hay empleados en esa planta, devolver vacío
+            if (empty($idsPlanta)) {
+                return response()->json([
+                    'empleados'          => [],
+                    'restringido'        => true,
+                    'motivo_restriccion' => $motivoRestriccion,
+                    'total'              => 0,
+                ]);
+            }
+            
+            $query->whereIn('id_empleado', $idsPlanta);
         }
 
-        $candidatos = $candidatos->take(10);
+        // Cargar candidatos (sin límite, ya filtrados por planta en la BD)
+        $candidatos = $query->with(['puesto', 'departamento'])
+            ->limit(100) // Límite de seguridad razonable
+            ->get();
 
             $resultados = $candidatos->map(function ($e) {
             // FIX A-3: Verificar si el empleado está actualmente en planta (entrada sin salida hoy)
@@ -1271,58 +1627,30 @@ class SolicitudController extends Controller
     }
 
     /**
-     * API: buscar externo por CURP (para precargar datos en el formulario).
-     * Ruta: GET /solicitudes/buscar-externo?curp=...
+     * API: Buscar externo por tipo + número de identificación.
+     * Ruta: GET /solicitudes/buscar-externo-identificacion?tipo_identificacion=...&identificacion=...
      *
-     * Si el externo ya existe (por CURP), devuelve sus datos para
-     * precargar el formulario y evitar reingresarlos.
+     * CAMBIO V7: unifica las viejas buscarExternoPorCurp y buscarExternoPorPasaporte.
      *
-     * CORRECCIÓN: Devuelve un objeto explícito con 'encontrado' => true/false
-     * para que el frontend no tenga que adivinar si la respuesta es null.
+     * Precarga los datos del externo si ya existe en el sistema, para que el
+     * formulario no pida volver a capturar nombre/teléfono.
      */
-        public function buscarExternoPorCurp(Request $request)
+    public function buscarExternoPorIdentificacion(Request $request)
     {
-        // FIX G-1: Validación regex estricta de CURP + uppercase.
         $request->validate([
-            'curp' => ['required', 'string', 'size:18', 'regex:/^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d$/'],
+            'tipo_identificacion' => ['required', 'in:curp,credencial_votar,cedula_profesional,pasaporte'],
+            'identificacion'      => ['required', 'string', 'max:50'],
         ]);
 
-        $curp = strtoupper($request->curp);
-        $externo = Externo::where('curp', $curp)->first();
-
-        if ($externo) {
-            $ultimaSolicitud = \App\Models\SolicitudExternoDetalle::where('id_externos', $externo->id_externos)
-                ->with('solicitudExt')
-                ->latest('id_solicitud_externo_detalle')
-                ->first();
-
-            return response()->json([
-                'encontrado' => true,
-                'id'         => $externo->id_externos,
-                'nombre'     => $externo->nombre_completo,
-                'telefono'   => $externo->telefono,
-                'empresa'    => $ultimaSolicitud?->solicitudExt?->empresa,
-                'tipo'       => $ultimaSolicitud?->solicitudExt?->tipo,
-            ]);
+        $tipo  = strtolower(trim($request->tipo_identificacion));
+        $valor = trim($request->identificacion);
+        if ($tipo === 'curp') {
+            $valor = strtoupper($valor);
         }
 
-        return response()->json([
-            'encontrado' => false,
-        ]);
-    }
-
-    /**
-     * FIX: Buscar externo por pasaporte.
-     * Ruta: GET /solicitudes/buscar-externo-pasaporte?pasaporte=...
-     */
-    public function buscarExternoPorPasaporte(Request $request)
-    {
-        $request->validate([
-            'pasaporte' => ['required', 'string', 'min:5', 'max:50'],
-        ]);
-
-        $pasaporte = strtoupper(trim($request->pasaporte));
-        $externo = Externo::where('pasaporte', $pasaporte)->first();
+        $externo = Externo::where('tipo_identificacion', $tipo)
+            ->where('identificacion', $valor)
+            ->first();
 
         if ($externo) {
             $ultimaSolicitud = \App\Models\SolicitudExternoDetalle::where('id_externos', $externo->id_externos)
@@ -1359,5 +1687,97 @@ class SolicitudController extends Controller
             return [];
         }
         return ['pase_salida', 'interplantas', 'visita', 'contratista'];
+    }
+
+    public function descargarCredencialPng($idDetalle)
+    {
+        $detalle = \App\Models\SolicitudExternoDetalle::with(['solicitudExt', 'externo'])
+            ->findOrFail($idDetalle);
+
+        if ($detalle->estado_qr !== 'autorizado' || !$detalle->codigo_qr) {
+            return back()->withErrors(['error' => 'Credencial no autorizada o expirada.']);
+        }
+
+        $pngData = \App\Services\CredencialService::generarPngIndividual($detalle->solicitudExt, $detalle);
+        $nombre = 'credencial_' . \Str::slug($detalle->externo?->nombre_completo ?? 'externo') . '.png';
+
+        return response($pngData, 200, [
+            'Content-Type' => 'image/png',
+            'Content-Disposition' => 'attachment; filename="' . $nombre . '"',
+        ]);
+    }
+
+    /**
+     * Reenvía las credenciales por correo.
+     */
+    public function reenviarCredenciales(SolicitudExt $solicitud, Request $request)
+    {
+        $user = $request->user();
+        
+        $puedeReenviar = ($solicitud->creador_empleado_id === (int) $user->username)
+            || $user->isAprobador() || $user->isAdmin() || $user->isSuperadmin();
+
+        if (!$puedeReenviar) {
+            return back()->withErrors(['error' => 'No tiene permisos para reenviar estas credenciales.']);
+        }
+
+        if (!in_array($solicitud->estado, ['aprobado', 'aprobado_parcial'])) {
+            return back()->withErrors(['error' => 'La solicitud no está aprobada.']);
+        }
+
+        try {
+            $usuarioCreador = \App\Models\UsuarioSca::where('username', (string) $solicitud->creador_empleado_id)->first();
+            if (!$usuarioCreador || !$usuarioCreador->email_emp) {
+                return back()->withErrors(['error' => 'El creador no tiene correo institucional registrado.']);
+            }
+
+            // Contar autorizados
+            $autorizados = $solicitud->externos->filter(function($d) {
+                return $d->estado_qr === 'autorizado' && $d->codigo_qr;
+            })->count();
+
+            if ($autorizados === 0) {
+                return back()->withErrors(['error' => 'No hay credenciales autorizadas para enviar.']);
+            }
+
+            // Enviar 1 solo correo con todo
+            \Mail::to($usuarioCreador->email_emp)
+                ->send(new \App\Mail\CredencialExternoMail(
+                    $solicitud,
+                    $usuarioCreador->nombre_completo
+                ));
+
+            \App\Models\LogSistema::registrar('REENVIAR_CREDENCIALES', "Reenvío de {$autorizados} credencial(es) de la solicitud EXT #{$solicitud->id_solicitud_ext} por {$user->username}");
+
+            // M2 [ScaModal] — Mensaje detallado de reenvío.
+            $mensaje = "<div class='text-start'>";
+            $mensaje .= "<div class='mb-2'><strong>Credenciales reenviadas:</strong> {$autorizados}</div>";
+            $mensaje .= "<div class='mb-2'><strong>Correo destino:</strong> {$usuarioCreador->email_emp}</div>";
+            $mensaje .= "<div class='alert alert-info mt-2 mb-0 py-2'><i class='bi bi-envelope-fill'></i> Se enviaron {$autorizados} credencial(es) con los QRs de acceso al creador de la solicitud.</div>";
+            $mensaje .= "</div>";
+
+            // M2: Setear flash en sesión ANTES de devolver JSON (Option E)
+            session()->flash('sca_modal', sca_modal_flash('success', 'Credenciales reenviadas', $mensaje));
+            if ($request->expectsJson()) {
+                return response()->json(['success' => true, 'redirect' => route('solicitudes.show.ext', $solicitud->id_solicitud_ext)]);
+            }
+            return back()->with('sca_modal', sca_modal_flash('success', 'Credenciales reenviadas', $mensaje));
+
+        } catch (\Exception $e) {
+            return back()->withErrors(['error' => 'Error al enviar: ' . $e->getMessage()]);
+        }
+    }
+    
+    /**
+     * Genera y descarga un PDF con TODAS las credenciales de la solicitud.
+     * Ruta: GET /solicitudes/ext/{solicitud}/descargar-credenciales
+     */
+ public function descargarCredenciales(SolicitudExt $solicitud)
+    {
+        $pdfData = \App\Services\CredencialService::generarPdfTodas($solicitud);
+        return response($pdfData, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="credenciales_' . $solicitud->id_solicitud_ext . '.pdf"',
+        ]);
     }
 }

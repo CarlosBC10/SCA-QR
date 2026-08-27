@@ -20,6 +20,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => \App\Http\Middleware\CheckRole::class,
             'debe_cambiar_password' => \App\Http\Middleware\DebeCambiarPassword::class,
         ]);
+
+        // Middleware global para deshabilitar el caché del navegador.
+        // Evita que el navegador muestre páginas viejas cuando cambias de usuario.
+        $middleware->append(\App\Http\Middleware\NoCacheResponses::class);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //

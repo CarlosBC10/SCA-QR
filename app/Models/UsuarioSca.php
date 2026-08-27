@@ -93,6 +93,15 @@ class UsuarioSca extends Authenticatable
         return $this->getRelation('_empleado_cached')?->nombre_completo ?? 'Empleado no encontrado';
     }
 
+    /**
+     * ID de planta del usuario (guardia o empleado).
+     *
+     * FIX V7 (bug de planta pegada): antes usaba $this->guardia? que es una
+     * relación lazy de Eloquent. Cuando el usuario se deserializa de la sesión,
+     * esa relación puede venir cacheada del usuario anterior. Ahora forzamos
+     * una consulta fresca a la BD con ->fresh('guardia') para garantizar que
+     * siempre tengamos el dato correcto del usuario actual.
+     */
     public function getPlantaIdAttribute(): ?int
     {
         if ($this->esGuardia()) {

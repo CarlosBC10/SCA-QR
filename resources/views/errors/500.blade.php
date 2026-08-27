@@ -17,7 +17,7 @@
         <i class="bi bi-server text-danger" style="font-size: 5rem;"></i>
         <h1 class="display-1 fw-bold text-danger mt-3">500</h1>
         <h3 class="fw-bold mb-2">Error del Servidor</h3>
-        <p class="text-muted mb-4">Ocurrió un problema interno (posible caída de base de datos). Inténtalo de nuevo más tarde.</p>
+        <p class="text-muted mb-4">Ocurrió un problema interno contacte al departamento de TI (verifique su conexion a internet). Inténtalo de nuevo más tarde.</p>
         <a href="/" class="btn btn-success">
             <i class="bi bi-arrow-left"></i> Volver al Inicio
         </a>

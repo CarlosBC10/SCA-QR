@@ -38,10 +38,24 @@ class PasswordController extends Controller
         // Validar contraseña actual (quitando el prefijo 'temp:')
         $hashReal = substr($user->password, 5);
         if (!Hash::check($request->password_actual, $hashReal)) {
+            // M2 [ScaModal] — Si es AJAX, devolver JSON con error de campo
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'errors'  => ['password_actual' => ['La contraseña actual es incorrecta.']],
+                ], 422);
+            }
             return back()->withErrors(['password_actual' => 'La contraseña actual es incorrecta.'])->withInput();
         }
 
         if (Hash::check($request->password_nuevo, $hashReal)) {
+            // M2 [ScaModal] — Si es AJAX, devolver JSON con error de campo
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'errors'  => ['password_nuevo' => ['La nueva contraseña no puede ser igual a la actual.']],
+                ], 422);
+            }
             return back()->withErrors(['password_nuevo' => 'La nueva contraseña no puede ser igual a la actual.'])->withInput();
         }
 
@@ -51,6 +65,27 @@ class PasswordController extends Controller
 
         \App\Models\LogSistema::registrar('CAMBIO_PASSWORD', "Usuario {$user->username} cambió su contraseña temporal");
 
-        return redirect()->route('home')->with('success', 'Contraseña cambiada correctamente. Bienvenido(a).');
+        // M2 [ScaModal] — Option E: Setear flash en la sesión ANTES de devolver JSON.
+        // Así, cuando el JS haga window.location.href, la página destino (dashboard)
+        // recibe el flash y muestra el success modal automáticamente.
+        // El loading actual se queda visible durante la navegación (feedback continuo).
+        session()->flash('sca_modal', sca_modal_flash(
+            'success',
+            'Contraseña cambiada',
+            'Tu contraseña se actualizó correctamente. Bienvenido(a).'
+        ));
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success'  => true,
+                'redirect' => route('home'),
+            ]);
+        }
+
+        // Fallback: redirect con flash (para navegadores sin JS)
+        return redirect()->route('home')->with(
+            'sca_modal',
+            sca_modal_flash('success', 'Contraseña cambiada', 'Tu contraseña se actualizó correctamente. Bienvenido(a).')
+        );
     }
 }

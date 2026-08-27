@@ -272,9 +272,9 @@ class NotificacionService
             );
         }
 
-        // 2. Si el paso fue "origen", notificar a los aprobadores de DESTINO
+        // 2. Si el paso fue "origen" o "origen_parcial", notificar a los aprobadores de DESTINO
         //    (para que sepan que les toca aprobar)
-        if ($paso === 'origen' && $solicitud instanceof SolicitudInt) {
+        if (in_array($paso, ['origen', 'origen_parcial']) && $solicitud instanceof SolicitudInt) {
             $aprobadoresDestino = self::obtenerAprobadoresDePlanta($solicitud->id_planta_destino);
             foreach ($aprobadoresDestino as $usuario) {
                 if ($usuario->id_usuario_sca !== $aprobador->id_usuario_sca) {

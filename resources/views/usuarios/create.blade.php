@@ -39,7 +39,8 @@
     <div class="tab-pane fade show active" id="empleado" role="tabpanel">
         <div class="card border-0 shadow-sm">
             <div class="card-body">
-                <form method="POST" action="{{ route('usuarios.store.empleado') }}">
+                {{-- M2 [ScaModal] — Form de crear usuario interno. Agregamos id para que el JS lo intercepte. --}}
+                <form method="POST" action="{{ route('usuarios.store.empleado') }}" id="form-create-empleado">
                     @csrf
 
                     <div class="mb-3">
@@ -73,7 +74,11 @@
                             <select name="id_rol" class="form-select" required>
                                 <option value="">Seleccionar...</option>
                                 @foreach($rolesPermitidos as $r)
-                                    <option value="{{ $r->id_rol }}" @if(old('id_rol')==$r->id_rol) selected @endif>{{ $r->nombre }}</option>
+                                    {{-- M2: Un empleado interno NO puede tener rol de Guardia
+                                        (los guardias son externos, con registro en tabla guardias). --}}
+                                    @if($r->nombre !== 'Guardia')
+                                        <option value="{{ $r->id_rol }}" @if(old('id_rol')==$r->id_rol) selected @endif>{{ $r->nombre }}</option>
+                                    @endif
                                 @endforeach
                             </select>
                         </div>
@@ -110,7 +115,7 @@
                     </div>
 
                     <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-success">
+                        <button type="submit" class="btn btn-success" id="btn-create-empleado">
                             <i class="bi bi-check-circle"></i> Crear Usuario
                         </button>
                         <a href="{{ route('usuarios.index') }}" class="btn btn-outline-secondary">Cancelar</a>
@@ -124,7 +129,9 @@
     <div class="tab-pane fade" id="guardia" role="tabpanel">
         <div class="card border-0 shadow-sm">
             <div class="card-body">
-                <form method="POST" action="{{ route('usuarios.store.guardia') }}">
+                {{-- M2 [ScaModal] — Form de crear guardia. Agregamos id para que el JS lo intercepte.
+                    Los guardias NO reciben correo. El admin define la contraseña directamente. --}}
+                <form method="POST" action="{{ route('usuarios.store.guardia') }}" id="form-create-guardia">
                     @csrf
 
                     <div class="row">
@@ -138,11 +145,13 @@
                             <label class="form-label">Nombre completo del guardia</label>
                             <input type="text" name="nombre_completo" class="form-control" required maxlength="200" value="{{ old('nombre_completo') }}">
                         </div>
-
                         <div class="col-md-6 mb-3">
-                            <label class="form-label">CURP</label>
-                            <input type="text" name="curp" class="form-control" maxlength="18" value="{{ old('curp') }}" oninput="this.value = this.value.toUpperCase()" placeholder="18 caracteres (opcional)">
-                            <div class="form-text">Opcional pero recomendado. Debe ser única.</div>
+                            <label class="form-label">CURP <span class="text-danger">*</span></label>
+                            <input type="text" name="curp" class="form-control @error('curp') is-invalid @enderror" required maxlength="18" value="{{ old('curp') }}" oninput="this.value = this.value.toUpperCase()" placeholder="18 caracteres">
+                            @error('curp')
+                                <div class="invalid-feedback d-block">{{ $message }}</div>
+                            @enderror
+                            <div class="form-text">Debe ser única. 18 caracteres exactos.</div>
                         </div>
 
                         <div class="col-md-6 mb-3">
@@ -155,19 +164,45 @@
                             </select>
                         </div>
 
-                        {{-- FIX I-10: Input para correo institucional obligatorio --}}
+                        {{-- M2: Rol fijo en Guardia (el controller lo fuerza así).
+                            Un guardia NO puede tener otro rol porque no tiene registro en sitec.empleados. --}}
                         <div class="col-md-6 mb-3">
-                            <label class="form-label">Correo Institucional <span class="text-danger">*</span></label>
-                            <input type="email" name="email_emp" class="form-control @error('email_emp') is-invalid @enderror" required value="{{ old('email_emp') }}" placeholder="correo@empresa.com">
-                            @error('email_emp')
+                            <label class="form-label">Rol</label>
+                            <div class="form-control bg-light d-flex align-items-center">
+                                <span class="badge bg-info text-dark">Guardia</span>
+                                <i class="bi bi-lock-fill text-muted ms-2"></i>
+                                <small class="text-muted ms-2">Fijo (los guardias siempre tienen este rol)</small>
+                            </div>
+                        </div>
+
+                        {{-- M2 [ScaModal] — Contraseña definida por el admin (no temporal, no correo) --}}
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Contraseña <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                <input type="password" name="password" id="pass-guardia-create" class="form-control @error('password') is-invalid @enderror" required minlength="8" value="{{ old('password') }}">
+                                <button class="btn btn-outline-secondary sca-toggle-pass" type="button" data-target="pass-guardia-create" title="Mostrar/ocultar">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
+                            @error('password')
                                 <div class="invalid-feedback d-block">{{ $message }}</div>
                             @enderror
-                            <div class="form-text">Se enviarán las credenciales a este correo.</div>
+                            <div class="form-text">Mínimo 8 caracteres, 1 mayúscula, 1 minúscula, 1 número y 1 símbolo. Entréguela personalmente al guardia.</div>
+                        </div>
+
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Confirmar contraseña <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                <input type="password" name="password_confirmation" id="pass-guardia-create-conf" class="form-control" required minlength="8" value="{{ old('password_confirmation') }}">
+                                <button class="btn btn-outline-secondary sca-toggle-pass" type="button" data-target="pass-guardia-create-conf" title="Mostrar/ocultar">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
 
                     <div class="d-flex gap-2">
-                        <button type="submit" class="btn btn-success">
+                        <button type="submit" class="btn btn-success" id="btn-create-guardia">
                             <i class="bi bi-check-circle"></i> Crear Guardia
                         </button>
                         <a href="{{ route('usuarios.index') }}" class="btn btn-outline-secondary">Cancelar</a>
@@ -246,15 +281,21 @@ document.getElementById('btnBuscar').addEventListener('click', async function() 
 
 function seleccionarEmpleado(e) {
     if (!e.encontrado || !e.activo || e.tiene_cuenta) {
-        let msg = !e.encontrado ? 'No se encontró en sitec.' : (!e.activo ? 'No tiene estatus "Alta" en sitec.' : 'Ya tiene una cuenta de usuario.');
-        alert(msg);
+        // M2 [ScaModal] — Reemplazamos alert(msg) por ScaModal.warning()
+        // con título y mensaje diferenciados según el caso.
+        if (!e.encontrado) {
+            ScaModal.warning('Empleado no encontrado', 'No se encontró el empleado en la base de datos de sitec. Verificá el ID o buscá por nombre.');
+        } else if (!e.activo) {
+            ScaModal.warning('Empleado inactivo', `El empleado <strong>${e.nombre}</strong> no tiene estatus "Alta" en sitec. Solo los empleados activos pueden tener cuenta de usuario.`);
+        } else if (e.tiene_cuenta) {
+            ScaModal.warning('Ya tiene cuenta', `El empleado <strong>${e.nombre}</strong> ya tiene una cuenta de usuario asociada.`);
+        }
         return;
     }
     mostrarEmpleadoSeleccionado(e);
     document.getElementById('resultadosBusqueda').innerHTML = '';
     document.getElementById('id_empleado').value = e.id; // Poner el ID real en el input
 }
-
 function mostrarEmpleadoSeleccionado(e) {
     document.getElementById('id_empleado').value = e.id;
     document.getElementById('empNombre').textContent = e.nombre;
@@ -275,6 +316,138 @@ function mostrarEmpleadoSeleccionado(e) {
         tipoHint.className = 'form-text text-warning';
     }
 }
+
+// ============================================================
+// M2 [ScaModal] — Intercept forms para crear usuario y guardia
+//
+// Maneja 2 flujos:
+//   1. Form de crear empleado (#form-create-empleado):
+//      → ScaModal.loading "Creando usuario..." → AJAX POST → flash en destino
+//   2. Form de crear guardia (#form-create-guardia):
+//      → ScaModal.loading "Creando guardia..." → AJAX POST → flash en destino
+// ============================================================
+document.addEventListener('DOMContentLoaded', function() {
+
+    // ===== 1. Crear empleado interno =====
+    const formEmpleado = document.getElementById('form-create-empleado');
+    if (formEmpleado) {
+        formEmpleado.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const btn = document.getElementById('btn-create-empleado');
+            const originalBtnHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Procesando...';
+
+            // Mostrar loading (envía correo, puede tardar)
+            ScaModal.loading('Creando usuario', 'Enviando contraseña temporal por correo...');
+
+            try {
+                const res = await fetch(formEmpleado.action, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                        'Accept': 'application/json',
+                    },
+                    body: new FormData(formEmpleado),
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    // Option E: NO cerrar loading. Redirect directo.
+                    window.location.href = data.redirect;
+                } else {
+                    ScaModal.close();
+                    if (data.errors) {
+                        // Errores de validación (422)
+                        const errores = Object.values(data.errors).flat();
+                        ScaModal.error('Error de validación', errores.join('<br>'));
+                    } else {
+                        ScaModal.error(data.titulo || 'Error', data.mensaje || 'No se pudo crear el usuario.');
+                    }
+                    btn.disabled = false;
+                    btn.innerHTML = originalBtnHtml;
+                }
+            } catch(err) {
+                ScaModal.close();
+                ScaModal.error('Error de conexión', 'No se pudo contactar con el servidor.');
+                btn.disabled = false;
+                btn.innerHTML = originalBtnHtml;
+            }
+        });
+    }
+
+    // ===== 2. Crear guardia =====
+    const formGuardia = document.getElementById('form-create-guardia');
+    if (formGuardia) {
+        formGuardia.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const btn = document.getElementById('btn-create-guardia');
+            const originalBtnHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Procesando...';
+
+            // Guardar la contraseña ANTES de enviar para mostrarla en el success
+            const passIngresada = document.getElementById('pass-guardia-create').value;
+
+            // Mostrar loading
+            ScaModal.loading('Creando guardia', 'Creando registro de guardia y usuario...');
+
+            try {
+                const res = await fetch(formGuardia.action, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                        'Accept': 'application/json',
+                    },
+                    body: new FormData(formGuardia),
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    // Option E: NO cerrar loading. Redirect directo.
+                    // Guardamos la contraseña en sessionStorage para mostrarla en el success
+                    // del destino (usuarios.index) vía flash modificado.
+                    if (passIngresada) {
+                        sessionStorage.setItem('sca_pass_guardia_creado', passIngresada);
+                    }
+                    window.location.href = data.redirect;
+                } else {
+                    ScaModal.close();
+                    if (data.errors) {
+                        const errores = Object.values(data.errors).flat();
+                        ScaModal.error('Error de validación', errores.join('<br>'));
+                    } else {
+                        ScaModal.error(data.titulo || 'Error', data.mensaje || 'No se pudo crear el guardia.');
+                    }
+                    btn.disabled = false;
+                    btn.innerHTML = originalBtnHtml;
+                }
+            } catch(err) {
+                ScaModal.close();
+                ScaModal.error('Error de conexión', 'No se pudo contactar con el servidor.');
+                btn.disabled = false;
+                btn.innerHTML = originalBtnHtml;
+            }
+        });
+    }
+
+    // ===== 3. Toggles "ver contraseña" en el form de crear guardia =====
+    document.querySelectorAll('.sca-toggle-pass').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const target = document.getElementById(this.dataset.target);
+            if (!target) return;
+            const icon = this.querySelector('i');
+            if (target.type === 'password') {
+                target.type = 'text';
+                icon.className = 'bi bi-eye-slash';
+            } else {
+                target.type = 'password';
+                icon.className = 'bi bi-eye';
+            }
+        });
+    });
+
+});
 </script>
 @endpush
 @endsection

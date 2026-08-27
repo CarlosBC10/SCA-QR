@@ -22,19 +22,38 @@
 @php
     // V4: Solicitud eliminado; contar pendientes en solicitudes_int + solicitudes_ext
     // Scoping: solo los pendientes de la planta del aprobador.
+    //
+    // FIX 3-a: ahora contamos también las solicitudes en 'aprobado_parcial'
+    // que siguen esperando revisión de este aprobador:
+    //   - Si falta aprobación de origen  → fecha_aprobacion_origen IS NULL
+    //   - Si falta aprobación de destino → fecha_aprobacion_destino IS NULL
     $plantaId = Auth::user()->planta_id;
 
-    // Internas: pendiente_origen (si es su planta origen) o pendiente_destino (si es su planta destino)
-    $pendientesInt = \App\Models\SolicitudInt::where(function($q) use ($plantaId) {
-        $q->where('id_planta_origen', $plantaId)->where('estado', 'pendiente_origen')
-          ->orWhere('id_planta_destino', $plantaId)->where('estado', 'pendiente_destino');
-    })->count();
+    // Pendientes en origen: pendiente_origen, O aprobado_parcial sin aprobar origen
+    $pendientesOrigen = \App\Models\SolicitudInt::where('id_planta_origen', $plantaId)
+        ->where(function($q) {
+            $q->where('estado', 'pendiente_origen')
+              ->orWhere(function($q2) {
+                  $q2->where('estado', 'aprobado_parcial')
+                     ->whereNull('fecha_aprobacion_origen');
+              });
+        })->count();
+
+    // Pendientes en destino: pendiente_destino, O aprobado_parcial sin aprobar destino
+    $pendientesDestino = \App\Models\SolicitudInt::where('id_planta_destino', $plantaId)
+        ->where(function($q) {
+            $q->where('estado', 'pendiente_destino')
+              ->orWhere(function($q2) {
+                  $q2->where('estado', 'aprobado_parcial')
+                     ->whereNull('fecha_aprobacion_destino');
+              });
+        })->count();
 
     // Externas: pendiente (si es su planta destino)
     $pendientesExt = \App\Models\SolicitudExt::where('id_planta_destino', $plantaId)
         ->where('estado', 'pendiente')->count();
 
-    $pendientesCount = $pendientesInt + $pendientesExt;
+    $pendientesCount = $pendientesOrigen + $pendientesDestino + $pendientesExt;
 @endphp
 
 <div class="row g-4 mb-4">

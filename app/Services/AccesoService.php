@@ -120,14 +120,17 @@ class AccesoService
             ];
         }
 
-        // Caso 5: planta distinta → requiere interplantas aprobado vigente
+        // Caso 5: planta distinta → requiere interplantas aprobado vigente.
+        // CAMBIO V7 (N2): agregamos 'planta_destino_id' para que el
+        // ScannerController pueda armar el mensaje "hacia {planta}".
         if ($this->tieneInterplantasVigente($empleado->id_empleado, $plantaId)) {
             return [
-                'permitido'        => true,
-                'motivo'           => null,
-                'motivo_codigo'    => null,
-                'planta_origen'    => $plantaBase,
-                'es_interplantas'  => true,
+                'permitido'         => true,
+                'motivo'            => null,
+                'motivo_codigo'     => null,
+                'planta_origen'     => $plantaBase,
+                'es_interplantas'   => true,
+                'planta_destino_id' => $plantaId,  // nuevo: para el mensaje
             ];
         }
 
@@ -258,7 +261,34 @@ class AccesoService
         // SALIDA
         // ============================================================
         if ($tipo === 'operativo') {
-            // Operativo: no puede salir antes de fin de turno...
+            // CAMBIO V7 (fix): si la hora actual es ANTES de que inicie el
+            // turno (ahoraTs < entradaTs), el empleado puede salir, pero
+            // requiere justificación (es una salida fuera de horario).
+            // Caso: empleado que entró temprano (ej. 1am) con turno 6am-2pm
+            // y quiere salir a las 5am (antes de que inicie el turno).
+            // Antes el sistema lo denegaba con "salida_temprana" porque solo
+            // comparaba con salidaTs. Ahora: si está antes del turno, permitir
+            // pero con justificación (el guardia valida por qué sale temprano).
+            if ($ahoraTs < $entradaTs) {
+                // ¿Tiene permiso de pase_salida o interplantas? Si sí, no justifica.
+                if ($this->tienePermisoParaSalir($empleado->id_empleado)) {
+                    return [
+                        'permitido'              => true,
+                        'requiere_justificacion' => false,
+                        'motivo'                 => null,
+                        'motivo_codigo'          => null,
+                    ];
+                }
+                // Sin permiso: permite salir pero con justificación.
+                return [
+                    'permitido'              => true,
+                    'requiere_justificacion' => true,
+                    'motivo'                 => 'Salida antes de su turno. Justifique su acceso.',
+                    'motivo_codigo'          => 'salida_antes_turno',
+                ];
+            }
+
+            // Operativo: no puede salir antes de fin de turno (durante el turno)...
             if ($ahoraTs < $salidaTs) {
                 // ...A MENOS que tenga pase_salida o interplantas vigente
                 if ($this->tienePermisoParaSalir($empleado->id_empleado)) {
@@ -363,13 +393,26 @@ class AccesoService
     //
     // Ambos deben estar aprobados y vigentes (fecha_inicio <= ahora <= fecha_fin).
 
-    public function tienePermisoParaSalir(int $empleadoId): bool
+    /**
+     * ¿El empleado tiene un permiso vigente que le permita salir
+     * durante su turno?
+     *
+     *   - pase_salida: el empleado se ausenta y se va (termina su día).
+     *   - interplantas: va a otra planta (necesita salir de su planta actual).
+     *
+     * CAMBIO V7 (N2): ahora devuelve un ARRAY con el tipo de permiso y
+     * la planta destino, para que el ScannerController pueda armar el
+     * mensaje correcto ("Salida autorizada con permiso de PASE DE SALIDA"
+     * o "Salida autorizada con permiso INTERPLANTAS hacia Partidas").
+     *
+     * @return array|null  ['tipo' => 'pase_salida'|'interplantas', 'planta_destino_id' => int|null]
+     *                     null si no tiene permiso vigente.
+     */
+    public function obtenerPermisoParaSalir(int $empleadoId): ?array
     {
         $ahora = Carbon::now();
 
-        // FIX FASE 1: Buscar si el empleado es creador O está en la lista grupal
-        // para ambos tipos de permiso (pase_salida e interplantas).
-        return SolicitudInt::whereIn('tipo', ['pase_salida', 'interplantas'])
+        $solicitud = SolicitudInt::whereIn('tipo', ['pase_salida', 'interplantas'])
             ->whereIn('estado', ['aprobado', 'aprobado_parcial'])
             ->where('fecha_inicio', '<=', $ahora)
             ->where('fecha_fin', '>=', $ahora)
@@ -377,10 +420,29 @@ class AccesoService
                 $q->where('creador_empleado_id', $empleadoId)
                   ->orWhereHas('empleados', function ($q2) use ($empleadoId) {
                       $q2->where('empleado_id', $empleadoId)
-                           ->where('estado', 'aprobado');
+                         ->where('estado', 'aprobado');
                   });
             })
-            ->exists();
+            ->orderBy('fecha_fin', 'asc')  // si hay varios, el que vence primero
+            ->first();
+
+        if (!$solicitud) {
+            return null;
+        }
+
+        return [
+            'tipo'              => $solicitud->tipo,           // 'pase_salida' | 'interplantas'
+            'planta_destino_id' => $solicitud->id_planta_destino,
+        ];
+    }
+
+    /**
+     * Wrapper de compatibilidad: devuelve true/false si tiene permiso.
+     * Mantiene el nombre viejo por si algo más lo llama.
+     */
+    public function tienePermisoParaSalir(int $empleadoId): bool
+    {
+        return $this->obtenerPermisoParaSalir($empleadoId) !== null;
     }
 
     // ============================================================

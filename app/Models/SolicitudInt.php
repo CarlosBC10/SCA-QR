@@ -125,11 +125,16 @@ class SolicitudInt extends Model
 
     /**
      * ¿Está vigente y aprobada? (para validar acceso en scanner)
+     *
+     * CAMBIO V7: usa estado_actual (accessor lazy) en vez de estado.
+     * Acepta 'aprobado' y 'aprobado_parcial' (los rechazados se filtran
+     * con incluyeEmpleado()). Rechaza 'expirado' y valida fecha_fin.
      */
     public function estaVigenteAprobada(): bool
     {
+        $estado = $this->estado_actual;  // ← accessor lazy
         $ahora = now();
-        return $this->estado === 'aprobado'
+        return in_array($estado, ['aprobado', 'aprobado_parcial'])
             && $this->fecha_inicio <= $ahora
             && $this->fecha_fin >= $ahora;
     }
@@ -148,5 +153,109 @@ class SolicitudInt extends Model
                 ->exists();
         }
         return $this->creador_empleado_id === $empleadoId;
+    }
+
+    // ============================================================
+    // EXPIRACIÓN LAZY (Sprint 2)
+    // ============================================================
+    //
+    // ¿Por qué lazy?
+    //   No queremos un cron ni un proceso en background. En lugar de
+    //   eso, cada vez que alguien consulta el estado de una solicitud
+    //   (escáner, bandeja, show, etc.), este accessor valida si ya
+    //   venció y, si es así, la marca como 'expirado' en BD en ese
+    //   momento. La siguiente consulta ya la encuentra expirada.
+    //
+    // ¿Por qué un accessor y no el campo estado directo?
+    //   Porque el campo estado en BD puede estar desactualizado si
+    //   nadie consultó la solicitud desde que venció. El accessor
+    //   siempre devuelve el estado REAL, considerando la fecha.
+
+    /**
+     * ACCESSOR: estado real de la solicitud, considerando expiración lazy.
+     *
+     * Uso: $solicitud->estado_actual  (NO $solicitud->estado)
+     *
+     * Lógica:
+     *   - Si ya está 'rechazado' o 'expirado' → devolver tal cual.
+     *   - Si fecha_fin < now() y está en pendiente* o aprobado*:
+     *     → actualizar BD a 'expirado'
+     *     → expirar también los solicitud_empleados
+     *     → devolver 'expirado'
+     *   - Si no → devolver el estado original.
+     */
+    public function getEstadoActualAttribute(): string
+    {
+        // Si ya está en un estado terminal, no hacer nada
+        if (in_array($this->estado, ['rechazado', 'expirado'])) {
+            return $this->estado;
+        }
+
+        // Si la vigencia ya pasó, expirar
+        if ($this->fecha_fin && $this->fecha_fin < now()) {
+            $this->estado = 'expirado';
+            $this->save();
+
+            // Expirar también los empleados de esta solicitud grupal.
+            // Solo los que estaban 'pendiente' o 'aprobado' (no tocar 'rechazado').
+            \App\Models\SolicitudEmpleado::where('id_solicitud_int', $this->id_solicitud_int)
+                ->whereIn('estado', ['pendiente', 'aprobado', 'aprobado_origen'])
+                ->update(['estado' => 'expirado']);
+
+            return 'expirado';
+        }
+
+        return $this->estado;
+    }
+
+    /**
+     * Infiere el motivo de expiración SIN necesidad de una columna extra.
+     *
+     * Reglas:
+     *   - Si no está expirada → NULL
+     *   - Si fecha_aprobacion_origen IS NULL → 'no_atendida'
+     *     (nadie la aprobó a tiempo)
+     *   - Si es interplantas y fecha_aprobacion_destino IS NULL → 'no_atendida'
+     *     (solo se aprobó origen, destino nunca la atendió)
+     *   - Si ambas aprobaciones están llenas → 'vigencia_concluida'
+     *     (se aprobó, se usó, y la vigencia terminó naturalmente)
+     */
+    public function motivoExpiracion(): ?string
+    {
+        if ($this->estado_actual !== 'expirado') {
+            return null;
+        }
+
+        // ¿Se aprobó en origen?
+        $aproboOrigen = !empty($this->fecha_aprobacion_origen);
+
+        // ¿Se aprobó en destino? (solo aplica a interplantas)
+        $aproboDestino = !empty($this->fecha_aprobacion_destino);
+
+        // Si nunca se aprobó en origen → no atendida
+        if (!$aproboOrigen) {
+            return 'no_atendida';
+        }
+
+        // Si es interplantas y no se aprobó en destino → no atendida
+        // (el aprobador de destino nunca la atendió)
+        if ($this->tipo === 'interplantas' && !$aproboDestino) {
+            return 'no_atendida';
+        }
+
+        // Si se aprobaron todos los pasos necesarios → vigencia concluida
+        return 'vigencia_concluida';
+    }
+
+    /**
+     * Etiqueta legible para mostrar en vistas.
+     */
+    public function getMotivoExpiracionLabelAttribute(): string
+    {
+        return match($this->motivoExpiracion()) {
+            'no_atendida'         => 'No fue atendida a tiempo',
+            'vigencia_concluida'  => 'Vigencia concluida',
+            default               => '—',
+        };
     }
 }

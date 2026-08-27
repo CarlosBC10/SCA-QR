@@ -133,6 +133,14 @@ class EmpleadoExtScaController extends Controller
         $user = $request->user();
         $empleado = Empleado::find($empleadoId);
         if (!$empleado) {
+            // M2 [ScaModal] — Si es AJAX, devolver JSON con error.
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'titulo'  => 'Empleado no encontrado',
+                    'mensaje' => 'El empleado ya no existe en sitec. Puede que haya sido dado de baja.',
+                ], 404);
+            }
             return back()->withErrors(['empleado' => 'Empleado no encontrado en sitec.']);
         }
 
@@ -189,8 +197,40 @@ class EmpleadoExtScaController extends Controller
             (isset($datos['id_planta']) ? ', id_planta=' . ($datos['id_planta'] ?? 'NULL') . ', forzada=' . ($datos['planta_forzada'] ? 'Sí' : 'No') : '')
         );
 
-        return redirect()->route('empleados.index')
-            ->with('success', "Configuración de {$empleado->nombre_completo} actualizada.");
+        // M2 [ScaModal] — Construir mensaje de éxito detallado.
+        // Incluye el tipo de empleado y la planta asignada (con indicador de forzada).
+        $plantaNombre = \App\Services\PlantaCacheService::nombrePlanta($datos['id_planta'] ?? null);
+        $plantaForzada = $datos['planta_forzada'] ?? false;
+        $reseteoManual = $request->boolean('resetear_manual');
+
+        $mensaje = "<div class='text-start'>";
+        $mensaje .= "<div class='mb-2'><strong>Empleado:</strong> {$empleado->nombre_completo} ({$empleado->id_empleado})</div>";
+        $mensaje .= "<div class='mb-2'><strong>Tipo:</strong> " . ucfirst($request->tipo_empleado) . "</div>";
+        $mensaje .= "<div class='mb-2'><strong>Planta:</strong> {$plantaNombre}";
+        if ($plantaForzada) {
+            $mensaje .= " <span class='badge bg-warning text-dark ms-1'>Forzada manualmente</span>";
+        }
+        $mensaje .= "</div>";
+        if ($reseteoManual) {
+            $mensaje .= "<div class='mb-2'><i class='bi bi-arrow-clockwise text-info'></i> Contador de manuales reseteado a 4.</div>";
+        }
+        $mensaje .= "</div>";
+
+        // M2 [ScaModal] — Option E: Setear flash en la sesión ANTES de devolver JSON.
+        session()->flash('sca_modal', sca_modal_flash('success', 'Configuración actualizada', $mensaje));
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success'  => true,
+                'redirect' => route('empleados.index'),
+            ]);
+        }
+
+        // Fallback: redirect con flash (para navegadores sin JS)
+        return redirect()->route('empleados.index')->with(
+            'sca_modal',
+            sca_modal_flash('success', 'Configuración actualizada', $mensaje)
+        );
     }
 
     /**

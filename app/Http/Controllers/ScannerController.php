@@ -228,34 +228,23 @@ class ScannerController extends Controller
         $guardiaId = null;
         $modoKiosko = 'mixto';
 
-        // FIX B-1 + C-3: Si el guardia opera desde el panel web (cámara o manual),
-        // se usa/crea su turno. Si viene del kiosko público (con turno_id en URL),
-        // se busca directamente.
+        // ============================================================
+        // CAMBIO V7 (Problema D): si el guardia opera desde el panel web,
+        // NO se crea un turno automático. El panel es una herramienta web
+        // separada del kiosko público. Los turnos solo se crean cuando el
+        // guardia activa un kiosko público explícitamente. Así evitamos
+        // turnos fantasma que aparecen como "kiosko activo" sin serlo.
+        // ============================================================
         $esGuardiaAutenticado = Auth::check() && Auth::user()->esGuardia();
         $origenesDeGuardia = ['guardia', 'manual'];
 
         if ($esGuardiaAutenticado && in_array($origen, $origenesDeGuardia, true)) {
+            // El guardia está usando el panel web. Usamos sus datos directamente.
             $user = Auth::user();
-
-            $turno = TurnoGuardia::where('id_guardia', $user->username)
-                ->whereNull('fecha_hora_fin')
-                ->latest('fecha_hora_inicio')
-                ->first();
-
-            if (!$turno) {
-                $turno = TurnoGuardia::create([
-                    'id_guardia'         => $user->username,
-                    'id_planta'          => $user->guardia->id_planta,
-                    'modo'               => 'mixto',
-                    'fecha_hora_inicio'  => now(),
-                ]);
-                LogSistema::registrar('INICIO_TURNO_GUARDIA', "Turno automático para guardia {$user->username} (escaneo desde dashboard)");
-            }
-
-            $plantaId = $turno->id_planta;
-            $guardiaId = $turno->id_guardia;
-            $modoKiosko = $turno->modo;
-            $turnoId = $turno->id_turno_guardia;
+            $plantaId = $user->guardia->id_planta;
+            $guardiaId = $user->username;
+            $modoKiosko = 'mixto';
+            $turnoId = null;  // no hay turno asociado (no es un kiosko público)
         } else {
             // Kiosko público: requiere turno_id en la URL
             $turno = TurnoGuardia::find($turnoId);
@@ -350,23 +339,22 @@ class ScannerController extends Controller
                 }
             }
 
-            $accesoService = app(AccesoService::class);
-            $validacion = $accesoService->validarAccesoPlanta($empleado, $plantaId);
+            // ============================================================
+            // CAMBIO V7 (fix N2): reorganizar validaciones.
+            // ============================================================
+            // Antes validarAccesoPlanta() se ejecutaba PRIMERO, antes de saber
+            // si era entrada o salida. Eso bloqueaba salidas legítimas cuando
+            // el permiso interplantas había expirado (la persona quedaba
+            // atrapada adentro).
+            //
+            // Ahora:
+            // 1. Determinar tipoEvento (entrada/salida) según última bitácora.
+            // 2. Validar continuidad de planta (evita inconsistencias).
+            // 3. SOLO si es ENTRADA, validar acceso a planta (permisos).
+            //    Si es SALIDA, no validar: si ya está adentro, siempre puede salir.
+            // ============================================================
 
-            if (!$validacion['permitido']) {
-                Bitacora::create([
-                    'persona_id'     => (string) $empleado->id_empleado,
-                    'id_guardia'     => $guardiaId,
-                    'tipo_evento'    => $modoKiosko === 'salida' ? 'salida' : 'entrada',
-                    'estado_evento'  => 'denegado',
-                    'motivo_denegacion' => $validacion['motivo_codigo'],
-                    'fecha_hora'     => now(),
-                    'id_planta'      => $plantaId,
-                ]);
-                return response()->json(['success' => false, 'message' => $validacion['motivo']]);
-            }
-
-            // V5: Buscar último evento por persona_id
+            // 1. Buscar último evento para determinar si es entrada o salida
             $ultimoEvento = Bitacora::where('persona_id', (string) $empleado->id_empleado)
                 ->hoy()
                 ->noDenegados()
@@ -379,9 +367,7 @@ class ScannerController extends Controller
                 return response()->json(['success' => false, 'message' => $this->mensajeModoInvalido($ultimoEvento, $modoKiosko)]);
             }
 
-            // FIX D-1: Validar continuidad de planta — no puedes operar en otra
-            // planta si tu última bitácora está en una distinta. 
-            // REGLA TAJANTE: Sin excepciones, ni siquiera con permisos vigentes.
+            // 2. Validar continuidad de planta (sigue siendo tajante)
             $continuidad = $this->validarContinuidadPlanta(
                 (string) $empleado->id_empleado,
                 $tipoEvento,
@@ -398,6 +384,40 @@ class ScannerController extends Controller
                     'id_planta'      => $plantaId,
                 ]);
                 return response()->json(['success' => false, 'message' => $continuidad]);
+            }
+
+            // 3. Validar acceso a planta SOLO para ENTRADAS.
+            // Si es SALIDA, no validar: la persona ya está adentro y siempre
+            // debe poder salir (no podemos retenerla).
+            $accesoService = app(AccesoService::class);
+
+            if ($tipoEvento === 'entrada') {
+                $validacion = $accesoService->validarAccesoPlanta($empleado, $plantaId);
+
+                if (!$validacion['permitido']) {
+                    Bitacora::create([
+                        'persona_id'     => (string) $empleado->id_empleado,
+                        'id_guardia'     => $guardiaId,
+                        'tipo_evento'    => 'entrada',
+                        'estado_evento'  => 'denegado',
+                        'motivo_denegacion' => $validacion['motivo_codigo'],
+                        'fecha_hora'     => now(),
+                        'id_planta'      => $plantaId,
+                    ]);
+                    return response()->json(['success' => false, 'message' => $validacion['motivo']]);
+                }
+            } else {
+                // Para SALIDAS: no validar acceso a planta.
+                // Creamos $validacion vacío para que el resto del código
+                // siga funcionando (datosPersonaEmpleado, mensaje, etc.).
+                $validacion = [
+                    'permitido'         => true,
+                    'motivo'            => null,
+                    'motivo_codigo'     => null,
+                    'planta_origen'     => $empleado->plantaId(),
+                    'es_interplantas'   => false,
+                    'planta_destino_id' => null,
+                ];
             }
 
             // V5: Buscar si hubo entrada hoy por persona_id
@@ -423,6 +443,26 @@ class ScannerController extends Controller
                 return response()->json(['success' => false, 'message' => $horario['motivo']]);
             }
 
+            // ============================================================
+            // CAMBIO V7 (N3): F10 + anomalía de horario combinadas.
+            // ============================================================
+            // Antes: si había anomalía de horario, se hacía RETURN antes de
+            // sortear F10, así que nunca se combinaban ambas. Un empleado que
+            // llegaba tarde Y le tocaba F10 solo se le justificaba el horario.
+            //
+            // Ahora: calculamos F10 PRIMERO. Si hay anomalía, seteamos
+            // revision_exhaustiva=true en la bitácora de 'revision_horario'.
+            // Así, cuando el guardia justifica el horario (justificarEscaneo),
+            // el estado pasa a 'pendiente_revision' (gracias a la lógica
+            // existente) y el guardia debe hacer también la revisión F10.
+            //
+            // Flujo del caso combinado:
+            //   1. revision_horario + revision_exhaustiva=true
+            //   2. guardia justifica horario → pendiente_revision
+            //   3. guardia resuelve F10 → autorizado
+            // ============================================================
+            $revisionF10 = $accesoService->sortearRevisionExhaustiva($empleado);
+
             if ($horario['requiere_justificacion']) {
                 $bitacora = Bitacora::create([
                     'persona_id'     => (string) $empleado->id_empleado,
@@ -431,10 +471,15 @@ class ScannerController extends Controller
                     'estado_evento'  => 'revision_horario',
                     'fecha_hora'     => now(),
                     'id_planta'      => $plantaId,
-                    'revision_exhaustiva' => false,
+                    'revision_exhaustiva' => $revisionF10,  // ← CAMBIO: true si también toca F10
                 ]);
 
                 $this->notificarGuardiasPendiente($plantaId, $bitacora, $empleado, 'justificacion');
+
+                // Mensaje según si también toca F10 o solo horario
+                $message = $revisionF10
+                    ? 'Acceso fuera de horario. Espere aquí, el guardia debe autorizar su acceso y realizar revisión.'
+                    : 'Acceso fuera de horario. Espere aquí, el guardia debe autorizar su acceso.';
 
                 return response()->json([
                     'success'               => true,
@@ -445,11 +490,9 @@ class ScannerController extends Controller
                     'tipo_evento'           => $tipoEvento,
                     'usos_restantes'        => $usosRestantes,
                     'persona'               => $this->datosPersonaEmpleado($empleado, $validacion),
-                    'message'               => 'Acceso fuera de horario. Espere aquí, el guardia debe autorizar su acceso.',
+                    'message'               => $message,
                 ]);
             }
-
-            $revisionF10 = $accesoService->sortearRevisionExhaustiva($empleado);
 
             if ($revisionF10) {
                 $bitacora = Bitacora::create([
@@ -486,10 +529,42 @@ class ScannerController extends Controller
                 'id_planta'      => $plantaId,
             ]);
 
+            // ============================================================
+            // CAMBIO V7 (N2): Mensaje según el tipo de permiso.
+            // ============================================================
+            // - Entrada a planta propia (sin permiso): "Entrada registrada correctamente."
+            // - Entrada por interplantas: "Entrada autorizada con permiso INTERPLANTAS hacia {planta}."
+            // - Salida en hora (sin permiso): "Salida registrada correctamente."
+            // - Salida por pase_salida: "Salida autorizada con permiso de PASE DE SALIDA."
+            // - Salida por interplantas: "Salida autorizada con permiso INTERPLANTAS hacia {planta}."
+            // ============================================================
+
             $message = ucfirst($tipoEvento) . ' registrada correctamente.';
-            if ($validacion['es_interplantas']) {
-                $message .= ' (Acceso interplantas autorizado.)';
+
+            // Si es ENTRADA por interplantas (planta distinta)
+            if ($tipoEvento === 'entrada' && $validacion['es_interplantas']) {
+                $plantaDestino = \App\Models\Planta::find($validacion['planta_destino_id'] ?? null);
+                $nombrePlanta = $plantaDestino?->nombre ?? 'otra planta';
+                $message = "Entrada autorizada con permiso INTERPLANTAS hacia {$nombrePlanta}.";
             }
+
+            // Si es SALIDA antes de hora, verificar qué permiso lo autorizó.
+            // validarHorario() ya validó que tenga permiso (si no, habría denegado).
+            // Aquí solo construimos el mensaje informativo.
+            if ($tipoEvento === 'salida' && $empleado->tipoEmpleado() === 'operativo') {
+                $permiso = $accesoService->obtenerPermisoParaSalir($empleado->id_empleado);
+                if ($permiso) {
+                    if ($permiso['tipo'] === 'pase_salida') {
+                        $message = 'Salida autorizada con permiso de PASE DE SALIDA.';
+                    } elseif ($permiso['tipo'] === 'interplantas') {
+                        $plantaDestino = \App\Models\Planta::find($permiso['planta_destino_id']);
+                        $nombrePlanta = $plantaDestino?->nombre ?? 'otra planta';
+                        $message = "Salida autorizada con permiso INTERPLANTAS hacia {$nombrePlanta}.";
+                    }
+                }
+            }
+
+            // Avisos de búsqueda manual (no se pierden)
             if ($origen === 'manual' && $usosRestantes <= 1 && $usosRestantes > 0) {
                 $message .= " ¡URGE REPOSICIÓN DE CREDENCIAL! Le queda {$usosRestantes} uso manual.";
             } elseif ($origen === 'manual') {
@@ -537,35 +612,6 @@ class ScannerController extends Controller
         // 'aprobado_parcial' y NINGUN externo podía entrar, ni siquiera los
         // autorizados. Ahora aceptamos ambos estados; la validación por-persona
         // (qrActivo) ya filtra a los cancelados.
-        //
-        // Además, unificamos la validación de vigencia en una sola llamada a
-        // estaVigenteAprobada() para evitar inconsistencias.
-        if (!in_array($solicitud->estado, ['aprobado', 'aprobado_parcial'], true)
-            || !$solicitud->estaVigenteAprobada()) {
-            Bitacora::create([
-                'persona_id'     => 'E-' . $externo->id_externos,
-                'id_guardia'     => $guardiaId,
-                'tipo_evento'    => 'entrada',
-                'estado_evento'  => 'denegado',
-                'motivo_denegacion' => 'credencial_expirada',
-                'fecha_hora'     => now(),
-                'id_planta'      => $plantaId,
-            ]);
-            return response()->json(['success' => false, 'message' => 'Credencial expirada o solicitud no aprobada.']);
-        }
-
-        if ($solicitud->id_planta_destino != $plantaId) {
-            Bitacora::create([
-                'persona_id'     => 'E-' . $externo->id_externos,
-                'id_guardia'     => $guardiaId,
-                'tipo_evento'    => 'entrada',
-                'estado_evento'  => 'denegado',
-                'motivo_denegacion' => 'planta_no_autorizada',
-                'fecha_hora'     => now(),
-                'id_planta'      => $plantaId,
-            ]);
-            return response()->json(['success' => false, 'message' => 'Planta no autorizada para esta credencial.']);
-        }
 
         // V5: Buscar último evento por persona_id (con prefijo E-)
         $ultimoEvento = Bitacora::where('persona_id', 'E-' . $externo->id_externos)
@@ -576,6 +622,47 @@ class ScannerController extends Controller
 
         $tipoEvento = (!$ultimoEvento || $ultimoEvento->tipo_evento === 'salida')
             ? 'entrada' : 'salida';
+
+        // ¿El externo está DENTRO? (última bitácora = entrada autorizada)
+        $estaDentro = $ultimoEvento
+            && $ultimoEvento->tipo_evento === 'entrada'
+            && $ultimoEvento->estado_evento === 'autorizado';
+
+        // ============================================================
+        // CAMBIO V7 (Problema C - fix): si el externo está DENTRO y quiere
+        // SALIR, no validar el estado de la solicitud. Ya está adentro,
+        // tiene que poder salir aunque el permiso haya expirado.
+        // Solo validar estado si quiere ENTRAR.
+        // ============================================================
+        if (!$estaDentro) {
+            // Quiere entrar → validar estado de la solicitud
+            if (!in_array($solicitud->estado_actual, ['aprobado', 'aprobado_parcial'], true)
+                || !$solicitud->estaVigenteAprobada()) {
+                Bitacora::create([
+                    'persona_id'     => 'E-' . $externo->id_externos,
+                    'id_guardia'     => $guardiaId,
+                    'tipo_evento'    => 'entrada',
+                    'estado_evento'  => 'denegado',
+                    'motivo_denengacion' => 'credencial_expirada',
+                    'fecha_hora'     => now(),
+                    'id_planta'      => $plantaId,
+                ]);
+                return response()->json(['success' => false, 'message' => 'Credencial expirada o solicitud no aprobada.']);
+            }
+
+            if ($solicitud->id_planta_destino != $plantaId) {
+                Bitacora::create([
+                    'persona_id'     => 'E-' . $externo->id_ternos,
+                    'id_guardia'     => $guardiaId,
+                    'tipo_evento'    => 'entrada',
+                    'estado_evento'  => 'denegado',
+                    'motivo_denegacion' => 'planta_no_autorizada',
+                    'fecha_hora'     => now(),
+                    'id_planta'      => $plantaId,
+                ]);
+                return response()->json(['success' => false, 'message' => 'Planta no autorizada para esta credencial.']);
+            }
+        }
 
         // FIX D-2: Validar continuidad de planta para externos — igual que
         // empleados, no pueden operar en otra planta si su última bitácora
@@ -800,10 +887,6 @@ class ScannerController extends Controller
     // 6. PANEL DEL GUARDIA (dashboard web)
     // ============================================================
 
-    /**
-     * Panel del guardia (dashboard web).
-     * CAMBIO V5: Busca kioskos activos por $user->username.
-     */
     public function panelGuardia()
     {
         $user = Auth::user();
@@ -814,8 +897,9 @@ class ScannerController extends Controller
             ->with('planta')
             ->get();
 
+        // El middleware global NoCacheResponses ya pone los headers anti-caché.
         return view('guardia.dashboard', compact('kioskosActivos'));
-    }
+    } 
 
     /**
      * API: pendientes del guardia (F10 + justificaciones de horario).
@@ -899,8 +983,11 @@ class ScannerController extends Controller
         $idsEmpleados = $eventos->filter(fn($b) => !str_starts_with($b->persona_id, 'E-'))
             ->pluck('persona_id')->unique()
             ->map(fn($id) => (int) $id)->toArray();
-        $empleados = Empleado::whereIn('id_empleado', $idsEmpleados)
-            ->pluck('nombre_completo', 'id_empleado');
+        // FIX V7 (Problema 4): cargar el empleado con su planta (para mostrar de dónde viene)
+        $empleados = Empleado::with('puesto', 'clasificacion')
+            ->whereIn('id_empleado', $idsEmpleados)
+            ->get()
+            ->keyBy('id_empleado');
 
         // V5: Para externos, extraer el ID numérico quitando el prefijo "E-"
         $idsExternos = $eventos->filter(fn($b) => str_starts_with($b->persona_id, 'E-'))
@@ -909,18 +996,45 @@ class ScannerController extends Controller
         $externos = \App\Models\Externo::whereIn('id_externos', $idsExternos)
             ->pluck('nombre_completo', 'id_externos');
 
-        $resultado = $eventos->map(function ($b) use ($empleados, $externos) {
+        // FIX V7 (Problema 3 + fix externos con 2 solicitudes): cargar TODOS los
+        // detalles de solicitud_externo de estos externos, agrupados por id_externos.
+        // Así podemos buscar cuál solicitud estaba vigente en el momento exacto
+        // del escaneo (por fecha_hora), y mostrar el tipo correcto (Visita/Contratista)
+        // incluso si la persona entró como Visita y luego como Contratista el mismo día.
+        $detallesExt = \App\Models\SolicitudExternoDetalle::with('solicitudExt')
+            ->whereIn('id_externos', $idsExternos)
+            ->get()
+            ->groupBy('id_externos');
+
+        $resultado = $eventos->map(function ($b) use ($empleados, $externos, $detallesExt) {
             // V5: Determinar si es empleado o externo según el prefijo de persona_id
             if (!str_starts_with($b->persona_id, 'E-')) {
                 // Es empleado: persona_id contiene el id_empleado numérico
                 $empId = (int) $b->persona_id;
-                $nombre = $empleados[$empId] ?? 'Desconocido';
+                $emp = $empleados[$empId] ?? null;
+                $nombre = $emp?->nombre_completo ?? 'Desconocido';
                 $tipoPersona = 'Emp';
+                // FIX V7 (Problema 4): planta base del empleado (de dónde viene)
+                $plantaBase = $emp?->plantaNombre() ?? '—';
             } else {
                 // Es externo: persona_id contiene "E-" + id_externos
                 $extId = (int) str_replace('E-', '', $b->persona_id);
                 $nombre = $externos[$extId] ?? 'Visitante';
-                $tipoPersona = 'Vis';
+
+                // FIX V7 (Problema 3): distinguir visita de contratista.
+                // Si el externo tiene varias solicitudes, buscar la que estaba
+                // vigente en el momento exacto del escaneo (por fecha_hora).
+                $detallesDeEsteExterno = $detallesExt[$extId] ?? collect();
+                $detalleMatch = $detallesDeEsteExterno->first(function ($d) use ($b) {
+                    $sol = $d->solicitudExt;
+                    if (!$sol) return false;
+                    return $sol->id_planta_destino == $b->id_planta
+                        && $sol->fecha_inicio <= $b->fecha_hora
+                        && $sol->fecha_fin >= $b->fecha_hora;
+                });
+                $tipoExt = $detalleMatch?->solicitudExt?->tipo ?? 'visitante';
+                $tipoPersona = $tipoExt === 'contratista' ? 'Contratista' : 'Visita';
+                $plantaBase = '—';  // los externos no tienen planta base
             }
 
             // Icono y color según el estado del evento
@@ -947,6 +1061,7 @@ class ScannerController extends Controller
                 'estado'       => $b->estado_evento,
                 'nombre'       => $nombre,
                 'tipo_persona' => $tipoPersona,
+                'planta_base'  => $plantaBase ?? '—',  // ← NUEVO (Problema 4)
                 'motivo'       => $b->motivo_denegacion,
             ];
         });
@@ -983,15 +1098,19 @@ class ScannerController extends Controller
 
         $planta = Planta::find($plantaId);
 
-        // Último evento de cada persona hoy (sin importar si es empleado o externo)
+        // Último evento de cada persona hoy (sin importar si es empleado o externo).
+        // CAMBIO V7 (fix): solo contar bitácoras 'autorizado'. Las que están
+        // en 'revision_horario' o 'pendiente_revision' NO cuentan como "dentro"
+        // porque la persona está esperando al guardia, no realmente adentro.
+        // Si el guardia justifica/resuelve, pasa a 'autorizado' y aparece aquí.
         $eventos = Bitacora::where('id_planta', $plantaId)
             ->whereDate('fecha_hora', today())
-            ->whereNotIn('estado_evento', ['denegado'])
+            ->where('estado_evento', 'autorizado')
             ->orderBy('fecha_hora', 'desc')
             ->get()
             // V5: Agrupar por persona_id (unificado)
             ->unique(fn($b) => $b->persona_id);
-
+            
         // Solo los que tienen entrada como último evento
         $dentro = $eventos->filter(fn($b) => $b->tipo_evento === 'entrada')->values();
 
@@ -1013,8 +1132,18 @@ class ScannerController extends Controller
             ->map(fn($id) => (int) str_replace('E-', '', $id))->toArray();
         $externos = \App\Models\Externo::whereIn('id_externos', $idsExternos)->get()->keyBy('id_externos');
 
+        // FIX V7 (Problema A + fix externos con 2 solicitudes): cargar TODOS los
+        // detalles de solicitud_externo de estos externos, agrupados por id_externos.
+        // Así podemos buscar cuál solicitud estaba vigente en el momento exacto
+        // de la entrada, y mostrar el tipo correcto (Visita/Contratista) aunque
+        // la persona tenga 2 solicitudes el mismo día.
+        $detallesExt = \App\Models\SolicitudExternoDetalle::with('solicitudExt')
+            ->whereIn('id_externos', $idsExternos)
+            ->get()
+            ->groupBy('id_externos');
+
         // Construir la lista de personas para el frontend
-        $lista = $dentro->map(function ($b) use ($empleados, $externos) {
+        $lista = $dentro->map(function ($b) use ($empleados, $externos, $detallesExt) {
             // V5: Si persona_id no empieza con "E-", es empleado
             if (!str_starts_with($b->persona_id, 'E-')) {
                 $empId = (int) $b->persona_id;
@@ -1030,11 +1159,26 @@ class ScannerController extends Controller
                 // Es externo: extraer el ID numérico quitando el prefijo "E-"
                 $extId = (int) str_replace('E-', '', $b->persona_id);
                 $ext = $externos->get($extId);
+
+                // FIX V7 (Problema A): distinguir visita de contratista.
+                // Si el externo tiene varias solicitudes, buscar la que estaba
+                // vigente en el momento exacto de la entrada (por fecha_hora).
+                $detallesDeEsteExterno = $detallesExt[$extId] ?? collect();
+                $detalleMatch = $detallesDeEsteExterno->first(function ($d) use ($b) {
+                    $sol = $d->solicitudExt;
+                    if (!$sol) return false;
+                    return $sol->id_planta_destino == $b->id_planta
+                        && $sol->fecha_inicio <= $b->fecha_hora
+                        && $sol->fecha_fin >= $b->fecha_hora;
+                });
+                $tipoExt = $detalleMatch?->solicitudExt?->tipo ?? 'visitante';
+                $tipoLabel = $tipoExt === 'contratista' ? 'Contratista' : 'Visita';
+
                 return [
-                    'tipo'        => 'visitante',
+                    'tipo'        => 'visitante',  // se mantiene para el conteo
                     'id'          => $b->persona_id,
                     'nombre'      => $ext?->nombre_completo ?? 'Visitante',
-                    'puesto'      => 'Visitante',
+                    'puesto'      => $tipoLabel,
                     'hora_entrada'=> $b->fecha_hora->format('H:i'),
                 ];
             }
@@ -1146,6 +1290,14 @@ class ScannerController extends Controller
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
+
+        // M5 [ScaModal] — Soporte AJAX
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => true,
+                'redirect' => route('login'),
+            ]);
+        }
 
         return redirect()->route('login');
     }

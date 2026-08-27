@@ -10,14 +10,14 @@
 </div>
 
 @if ($errors->any())
-<div class="alert alert-danger" style="border-radius:12px;">
-    <h6 class="fw-bold mb-2"><i class="bi bi-exclamation-triangle"></i> Corrija los siguientes errores:</h6>
-    <ul class="mb-0 ps-3">
-        @foreach ($errors->all() as $error)
-            <li>{{ $error }}</li>
-        @endforeach
-    </ul>
-</div>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        if (window.ScaModal) {
+            let errores = {{ \Illuminate\Support\Js::from($errors->all()) }};
+            ScaModal.error('Corrija los siguientes errores', '<ul class="mb-0 text-start"><li>' + errores.join('</li><li>') + '</li></ul>');
+        }
+    });
+</script>
 @endif
 
 <form method="POST" action="{{ route('solicitudes.store') }}">
@@ -258,7 +258,7 @@
                         <i class="bi bi-search"></i> Buscar
                     </button>
                 </div>
-                <div id="resultados-anfitrion" class="mb-2"></div>
+                <div id="resultados-anfitrion" class="mb-2" style="max-height: 250px; overflow-y: auto;"></div>
                 <input type="hidden" name="anfitrion_empleado_id" id="anfitrion_empleado_id" value="">
                 <div id="anfitrion-seleccionado" class="alert alert-success py-2 small" style="display:none;">
                     <i class="bi bi-person-check"></i> <span id="anfitrion-nombre"></span>
@@ -319,7 +319,7 @@
                         <i class="bi bi-search"></i> Buscar
                     </button>
                 </div>
-                <div id="resultados-busqueda" class="mb-3"></div>
+                <div id="resultados-busqueda" class="mb-3" style="max-height: 250px; overflow-y: auto;"></div>
                 <div id="empleados-seleccionados" class="list-group"></div>
             </div>
         </div>
@@ -810,7 +810,14 @@ document.getElementById('btn-buscar-anfitrion').addEventListener('click', async 
                         ${motivoRestriccion}
                     </div>`;
             } else {
-                div.innerHTML = '<div class="alert alert-secondary py-2 small">No se encontraron empleados con ese criterio.</div>';
+                // FIX V7: mensaje simple y correcto cuando no hay resultados.
+                // Antes el JS mostraba el mensaje confuso del backend, ahora
+                // solo dice que no encontró con ese criterio en la planta origen.
+                const nombrePlanta = '';
+                div.innerHTML = `
+                    <div class="alert alert-secondary py-2 small">
+                        <i class="bi bi-search"></i> No se encontraron empleados de esta planta con ese criterio.
+                    </div>`;
             }
             return;
         }
@@ -851,6 +858,8 @@ function seleccionarAnfitrion(id, nombre) {
 }
 
 // ===== EXTERNOS: AGREGAR FILA =====
+// CAMBIO V7: un solo select con 4 tipos de identificación + un solo input.
+// Antes había dos inputs (curp/pasaporte) y un radio button para elegir.
 function agregarExterno() {
     externosCounter++;
     const idx = externosCounter;
@@ -871,43 +880,33 @@ function agregarExterno() {
         <div class="row g-2">
             <div class="col-md-4">
                 <label class="form-label small">Tipo de identificación <span class="text-danger">*</span></label>
-                <select name="externos[${idx}][tipo_id]" class="form-select form-select-sm externo-tipo-id" onchange="cambiarTipoId(${idx})">
-                    <option value="curp">CURP (Mexicano)</option>
-                    <option value="pasaporte">Pasaporte (Extranjero)</option>
+                <select name="externos[${idx}][tipo_identificacion]" class="form-select form-select-sm externo-tipo-id" onchange="cambiarTipoId(${idx})">
+                    <option value="">Seleccione...</option>
+                    <option value="curp">CURP</option>
+                    <option value="credencial_votar">Credencial para votar (INE/IFE)</option>
+                    <option value="cedula_profesional">Cédula profesional</option>
+                    <option value="pasaporte">Pasaporte (extranjero)</option>
                 </select>
             </div>
-            <div class="col-md-4" id="campo-curp-${idx}">
-                <label class="form-label small">CURP <span class="text-danger">*</span></label>
+            <div class="col-md-4" id="campo-identificacion-${idx}">
+                <label class="form-label small">Número de identificación <span class="text-danger">*</span></label>
                 <div class="input-group">
-                    <input type="text" name="externos[${idx}][curp]" class="form-control form-control-sm externo-curp" maxlength="18" placeholder="18 caracteres" oninput="this.value = this.value.toUpperCase()" required>                    
-                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="buscarExternoPorCurp(${idx})">
+                    <input type="text" name="externos[${idx}][identificacion]" class="form-control form-control-sm externo-identificacion" maxlength="50" placeholder="Seleccione primero el tipo" oninput="normalizarIdentificacion(${idx})">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="buscarExternoPorIdentificacion(${idx})" title="Buscar en el sistema">
                         <i class="bi bi-search"></i>
                     </button>
                 </div>
-                <small class="text-muted">Presione la lupa para buscar.</small>
-            </div>
-            <div class="col-md-4" id="campo-pasaporte-${idx}" style="display:none;">
-                <label class="form-label small">Pasaporte <span class="text-danger">*</span></label>
-                <div class="input-group">
-                    <input type="text" name="externos[${idx}][pasaporte]" class="form-control form-control-sm externo-pasaporte" maxlength="50" placeholder="Número de pasaporte" oninput="this.value = this.value.toUpperCase()">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="buscarExternoPorPasaporte(${idx})">
-                        <i class="bi bi-search"></i>
-                    </button>
-                </div>
-                <small class="text-muted">Presione la lupa para buscar.</small>
+                <small class="text-muted" id="hint-identificacion-${idx}">Presione la lupa para buscar.</small>
             </div>
             <div class="col-md-8">
                 <label class="form-label small">Nombre completo <span class="text-danger">*</span></label>
                 <input type="text" name="externos[${idx}][nombre]" class="form-control form-control-sm externo-nombre" required
-                       placeholder="Carlos Blanco Castillo">
-                <small class="text-muted">Se normaliza a Primera Mayúscula al salir del campo.</small>
+                       placeholder="Nombre Apellidos">
             </div>
             <div class="col-md-6">
                 <label class="form-label small">Teléfono</label>
-                <div class="input-group input-group-sm">
-                    <span class="input-group-text">+52</span>
-                    <input type="tel" name="externos[${idx}][telefono]" class="form-control externo-telefono" maxlength="10" pattern="\\d{10}" placeholder="1234567890" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
-                </div>
+                <input type="tel" name="externos[${idx}][telefono]" class="form-control externo-telefono" maxlength="10" pattern="\\d{10}" placeholder="1234567890" oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+                <small class="text-muted">10 digitos.</small>
             </div>
         </div>
         <div class="externo-precarga mt-2" style="display:none;"></div>
@@ -915,61 +914,65 @@ function agregarExterno() {
     lista.appendChild(fila);
 }
 
-// FIX: Cambiar entre CURP y Pasaporte
+// CAMBIO V7: en lugar de mostrar/ocultar campos, ajusta el placeholder y
+// maxlength del input según el tipo elegido, y limpia el valor si cambia.
 function cambiarTipoId(idx) {
-    const tipoId = document.querySelector(`#externo-${idx} .externo-tipo-id:checked`).value;
-    const campoCurp = document.getElementById(`campo-curp-${idx}`);
-    const campoPasaporte = document.getElementById(`campo-pasaporte-${idx}`);
-    const inputCurp = document.querySelector(`#externo-${idx} .externo-curp`);
-    const inputPasaporte = document.querySelector(`#externo-${idx} .externo-pasaporte`);
-
-    if (tipoId === 'curp') {
-        campoCurp.style.display = 'block';
-        campoPasaporte.style.display = 'none';
-        inputCurp.required = true;
-        inputPasaporte.required = false;
-        // No limpiamos el valor si ya tenía algo, por si se equivocó de botón
-    } else {
-        campoCurp.style.display = 'none';
-        campoPasaporte.style.display = 'block';
-        inputCurp.required = false;
-        inputPasaporte.required = true;
-    }
-}
-
-// FIX: Buscar externo por pasaporte
-async function buscarExternoPorPasaporte(idx) {
     const fila = document.getElementById(`externo-${idx}`);
-    const pasaporte = fila.querySelector('.externo-pasaporte').value.trim().toUpperCase();
-    const precargaDiv = fila.querySelector('.externo-precarga');
+    const selectTipo = fila.querySelector('.externo-tipo-id');
+    const inputId = fila.querySelector('.externo-identificacion');
+    const hint = document.getElementById(`hint-identificacion-${idx}`);
 
-    if (pasaporte.length < 5) {
-        precargaDiv.style.display = 'block';
-        precargaDiv.className = 'externo-precarga mt-2 alert alert-warning py-1 small';
-        precargaDiv.textContent = 'El pasaporte debe tener al menos 5 caracteres.';
+    const tipoId = selectTipo.value;
+    if (!tipoId) {
+        inputId.placeholder = 'Seleccione primero el tipo';
+        inputId.maxLength = 50;
+        hint.textContent = 'Presione la lupa para buscar.';
         return;
     }
 
-    try {
-        const res = await fetch(`{{ route('solicitudes.buscar-externo-pasaporte') }}?pasaporte=${encodeURIComponent(pasaporte)}`);
-        const data = await res.json();
-        
-        if (data.encontrado === true) {
-            fila.querySelector('.externo-nombre').value = data.nombre || '';
-            fila.querySelector('.externo-telefono').value = data.telefono || '';
-            
-            precargaDiv.style.display = 'block';
-            precargaDiv.className = 'externo-precarga mt-2 alert alert-success py-1 small';
-            precargaDiv.innerHTML = '<i class="bi bi-check-check"></i> Persona encontrada en el sistema. Datos precargados.';
-        } else {
-            precargaDiv.style.display = 'block';
-            precargaDiv.className = 'externo-precarga mt-2 alert alert-info py-1 small';
-            precargaDiv.textContent = 'Pasaporte no registrado. Se creará un nuevo registro al guardar.';
+    // Configuración por tipo
+    const config = {
+        'curp': {
+            placeholder: '18 caracteres (ej. BMLC850915HMCRGN09)',
+            maxLength: 18,
+            hint: 'La CURP se convierte a MAYÚSCULAS automáticamente.'
+        },
+        'credencial_votar': {
+            placeholder: '13 dígitos (ej. 1234567890123)',
+            maxLength: 13,
+            hint: 'Clave de elector al reverso de la INE.'
+        },
+        'cedula_profesional': {
+            placeholder: '7-12 dígitos (ej. 12345678)',
+            maxLength: 20,
+            hint: 'Número de cédula profesional.'
+        },
+        'pasaporte': {
+            placeholder: 'Número de pasaporte (ej. G12345678)',
+            maxLength: 50,
+            hint: 'Pasaporte tal cual aparece en el documento.'
         }
-    } catch(err) {
-        precargaDiv.style.display = 'block';
-        precargaDiv.className = 'externo-precarga mt-2 alert alert-danger py-1 small';
-        precargaDiv.textContent = 'Error al buscar.';
+    };
+
+    const c = config[tipoId] || { placeholder: '', maxLength: 50, hint: '' };
+    inputId.placeholder = c.placeholder;
+    inputId.maxLength = c.maxLength;
+    hint.textContent = c.hint;
+
+    // Limpiar valor al cambiar tipo (porque el formato cambia)
+    if (inputId.value.trim() !== '') {
+        inputId.value = '';
+    }
+}
+
+// Normaliza el valor del input según el tipo (CURP siempre mayúsculas)
+function normalizarIdentificacion(idx) {
+    const fila = document.getElementById(`externo-${idx}`);
+    const selectTipo = fila.querySelector('.externo-tipo-id');
+    const inputId = fila.querySelector('.externo-identificacion');
+
+    if (selectTipo.value === 'curp') {
+        inputId.value = inputId.value.toUpperCase();
     }
 }
 
@@ -980,46 +983,70 @@ function quitarExterno(idx) {
     }
 }
 
-// ===== EXTERNOS: BUSCAR POR CURP =====
-async function buscarExternoPorCurp(idx) {
+// ===== EXTERNOS: BUSCAR POR IDENTIFICACIÓN =====
+// CAMBIO V7: unifica las viejas buscarExternoPorCurp y buscarExternoPorPasaporte.
+async function buscarExternoPorIdentificacion(idx) {
     const fila = document.getElementById(`externo-${idx}`);
-    const curp = fila.querySelector('.externo-curp').value.trim().toUpperCase();
+    const selectTipo = fila.querySelector('.externo-tipo-id');
+    const inputId = fila.querySelector('.externo-identificacion');
     const precargaDiv = fila.querySelector('.externo-precarga');
 
-    if (curp.length !== 18) {
+    const tipoId = selectTipo.value.trim();
+    const valor = inputId.value.trim();
+
+    // Validaciones previas
+    if (!tipoId) {
         precargaDiv.style.display = 'block';
         precargaDiv.className = 'externo-precarga mt-2 alert alert-warning py-1 small';
-        precargaDiv.textContent = 'La CURP debe tener 18 caracteres.';
+        precargaDiv.textContent = 'Seleccione primero el tipo de identificación.';
         return;
     }
 
+    if (!valor) {
+        precargaDiv.style.display = 'block';
+        precargaDiv.className = 'externo-precarga mt-2 alert alert-warning py-1 small';
+        precargaDiv.textContent = 'Capture el número de identificación.';
+        return;
+    }
+
+    // Validación específica por tipo
+    if (tipoId === 'curp' && valor.length !== 18) {
+        precargaDiv.style.display = 'block';
+        precargaDiv.className = 'externo-precarga mt-2 alert alert-warning py-1 small';
+        precargaDiv.textContent = 'La CURP debe tener exactamente 18 caracteres.';
+        return;
+    }
+
+    // Verificar duplicados en otras filas del mismo formulario
     const filas = document.querySelectorAll('.externo-fila');
     for (let i = 0; i < filas.length; i++) {
         if (filas[i].id === `externo-${idx}`) continue;
-        const otraCurp = filas[i].querySelector('.externo-curp').value.trim().toUpperCase();
-        if (otraCurp === curp) {
+        const otroTipo = filas[i].querySelector('.externo-tipo-id').value.trim();
+        const otroValor = filas[i].querySelector('.externo-identificacion').value.trim();
+        if (otroTipo === tipoId && otroValor.toLowerCase() === valor.toLowerCase()) {
             precargaDiv.style.display = 'block';
             precargaDiv.className = 'externo-precarga mt-2 alert alert-warning py-1 small';
-            precargaDiv.textContent = 'Esta CURP ya fue agregada en otra fila. No la repita.';
+            precargaDiv.textContent = 'Esta identificación ya fue agregada en otra fila. No la repita.';
             return;
         }
     }
 
     try {
-        const res = await fetch(`{{ route('solicitudes.buscar-externo') }}?curp=${encodeURIComponent(curp)}`);
+        const url = `{{ route('solicitudes.buscar-externo-identificacion') }}?tipo_identificacion=${encodeURIComponent(tipoId)}&identificacion=${encodeURIComponent(valor)}`;
+        const res = await fetch(url);
         const data = await res.json();
-        
+
         if (data.encontrado === true) {
             fila.querySelector('.externo-nombre').value = data.nombre || '';
             fila.querySelector('.externo-telefono').value = data.telefono || '';
-            
+
             precargaDiv.style.display = 'block';
             precargaDiv.className = 'externo-precarga mt-2 alert alert-success py-1 small';
             precargaDiv.innerHTML = '<i class="bi bi-check-check"></i> Persona encontrada en el sistema. Datos precargados. Se vinculará a esta solicitud.';
         } else {
             precargaDiv.style.display = 'block';
             precargaDiv.className = 'externo-precarga mt-2 alert alert-info py-1 small';
-            precargaDiv.textContent = 'CURP no registrada. Se creará un nuevo registro al guardar.';
+            precargaDiv.textContent = 'Identificación no registrada. Se creará un nuevo registro al guardar.';
         }
     } catch(err) {
         precargaDiv.style.display = 'block';
@@ -1108,10 +1135,10 @@ document.getElementById('buscar-emp').addEventListener('keypress', function(e) {
 // FIX A-2: Variable para guardar el turno de referencia (del creador o del primer empleado)
 let turnoReferencia = { entrada: null, salida: null };
 
-function agregarEmpleado(id, nombre, turnoEntrada, turnoSalida, tipoEmp, estaEnPlanta) {
-    if (empleadosAgregados.includes(id)) { alert('Ese empleado ya fue agregado.'); return; }
+async function agregarEmpleado(id, nombre, turnoEntrada, turnoSalida, tipoEmp, estaEnPlanta) {
+    if (empleadosAgregados.includes(id)) { ScaModal.warning('Empleado repetido', 'Ese empleado ya fue agregado.'); return; }
     if (parseInt(id) === miEmpleadoId) {
-        alert('No puede agregarse a sí mismo. El sistema lo incluye automáticamente.');
+        ScaModal.info('Aviso', 'No puede agregarse a sí mismo. El sistema lo incluye automáticamente.');
         return;
     }
 
@@ -1134,10 +1161,34 @@ function agregarEmpleado(id, nombre, turnoEntrada, turnoSalida, tipoEmp, estaEnP
 
     // 2. Validaciones para PASE DE SALIDA
     if (tipo === 'pase_salida') {
-        // 2.1 Si es para HOY y está en planta, NO se agrega
+        // ============================================================
+        // CAMBIO V7 (fix N2): Si es para HOY y está en planta, verificar
+        // si está dentro o fuera de su turno.
+        // ============================================================
+        // - En planta + ANTES de su hora de salida → PERMITIR (caso normal
+        //   del Pase de Salida: salir temprano con permiso).
+        // - En planta + DESPUÉS de su hora de salida + tolerancia →
+        //   BLOQUEAR (no necesita pase; el guardia justifica la salida
+        //   tardía en el kiosko al escanear su salida).
+        // ============================================================
         if (paraCuando === 'hoy' && estaEnPlanta) {
-            alert(`${nombre} está actualmente en planta. No se puede agregar a la solicitud, pero puede salir justificando su salida con el guardia.`);
-            return;
+            if (turnoSalida) {
+                const ahora = new Date();
+                const tiempoActualMin = ahora.getHours() * 60 + ahora.getMinutes();
+                const [horasSal, minsSal] = turnoSalida.split(':').map(Number);
+                const tiempoSalidaMin = horasSal * 60 + minsSal;
+                const toleranciaSalida = 30; // 30 min después de la salida
+                const salidaMax = tiempoSalidaMin + toleranciaSalida;
+
+                if (tiempoActualMin > salidaMax) {
+                    // Está fuera de turno (ya pasó su hora de salida + tolerancia)
+                    ScaModal.info('Aviso de turno', `${nombre} está en planta pero ya pasó su hora de salida (${turnoSalida.substring(0,5)}). No necesita un Pase de Salida: el guardia puede justificar su salida tardía directamente en el kiosko al escanear su salida.`);
+                    return;
+                }
+                // Si está dentro de turno (antes de la hora de salida) → PERMITIR.
+                // Es el caso normal del Pase de Salida: salir temprano con permiso.
+            }
+            // Si no tiene turnoSalida, no podemos validar; permitimos agregar.
         }
 
         // 2.2 Validar solapamiento de turnos
@@ -1147,11 +1198,11 @@ function agregarEmpleado(id, nombre, turnoEntrada, turnoSalida, tipoEmp, estaEnP
                 turnoEntrada, turnoSalida
             );
             if (!solapado) {
-                alert(`No se puede agregar a ${nombre} porque su turno (${turnoEntrada.substring(0,5)}-${turnoSalida.substring(0,5)}) no se solapa con el rango del permiso. Todos deben compartir un rango de horario común.`);
+                ScaModal.error('Turno incompatible', `No se puede agregar a ${nombre} porque su turno (${turnoEntrada.substring(0,5)}-${turnoSalida.substring(0,5)}) no se solapa con el rango del permiso. Todos deben compartir un rango de horario común.`);
                 return;
             }
         } else if (!turnoEntrada || !turnoSalida) {
-            if (!confirm(`${nombre} no tiene turno asignado. Se le aplicarán las mismas horas. ¿Desea agregarlo de todas formas?`)) {
+            if (!await ScaModal.confirm({ titulo: 'Sin turno asignado', mensaje: `${nombre} no tiene turno asignado. Se le aplicarán las mismas horas. ¿Desea agregarlo de todas formas?`, tipo: 'warning' })) {
                 return;
             }
         }
@@ -1167,7 +1218,7 @@ function agregarEmpleado(id, nombre, turnoEntrada, turnoSalida, tipoEmp, estaEnP
                 if (tipoEmp === 'operativo' && diaSemana === 0) esDiaLaboral = false;
 
                 if (!esDiaLaboral) {
-                    alert(`No se puede agregar a ${nombre} porque el día seleccionado no es laboral para este empleado.`);
+                    ScaModal.error('Día no laboral', `No se puede agregar a ${nombre} porque el día seleccionado no es laboral para este empleado.`);
                     return;
                 }
             }
@@ -1176,7 +1227,7 @@ function agregarEmpleado(id, nombre, turnoEntrada, turnoSalida, tipoEmp, estaEnP
     // 3. Validaciones para INTERPLANTAS (Flexible)
     else if (tipo === 'interplantas') {
         if (!turnoEntrada || !turnoSalida) {
-            if (!confirm(`${nombre} no tiene turno asignado. ¿Desea agregarlo de todas formas?`)) {
+            if (!await ScaModal.confirm({ titulo: 'Sin turno asignado', mensaje: `${nombre} no tiene turno asignado. ¿Desea agregarlo de todas formas?`, tipo: 'warning' })) {
                 return;
             }
         }
@@ -1191,7 +1242,7 @@ function agregarEmpleado(id, nombre, turnoEntrada, turnoSalida, tipoEmp, estaEnP
                 if (tipoEmp === 'operativo' && diaSemana === 0) esDiaLaboral = false;
 
                 if (!esDiaLaboral) {
-                    alert(`Aviso: ${nombre} está en día no laboral. Se agregará, pero el guardia deberá justificar en el escáner.`);
+                    ScaModal.warning('Día no laboral', `${nombre} está en día no laboral. Se agregará, pero el guardia deberá justificar en el escáner.`);
                 }
             }
         }
@@ -1271,7 +1322,7 @@ document.querySelector('form').addEventListener('submit', async function(e) {
 
     if (!tipoSubmit) {
         e.preventDefault();
-        alert('Seleccione el tipo de solicitud.');
+        ScaModal.warning('Faltan datos', 'Seleccione el tipo de solicitud.');
         return;
     }
 
@@ -1283,21 +1334,27 @@ document.querySelector('form').addEventListener('submit', async function(e) {
             const nombresVacios = Array.from(filas).some(f => !f.querySelector('.externo-nombre').value.trim());
             if (nombresVacios) errores.push('Todas las personas deben tener un nombre.');
 
-            // FIX G: Validar identificación obligatoria antes de enviar
+            // CAMBIO V7: Validar identificación oficial unificada antes de enviar.
+            // Antes este bloque buscaba .externo-curp y .externo-pasaporte que ya
+            // no existen (se unificaron en .externo-identificacion). Eso hacía que
+            // siempre fallara con "La CURP es obligatoria" aunque el campo estuviera
+            // lleno, porque ?.value devolvía undefined y !undefined === true.
             Array.from(filas).forEach((fila, index) => {
-                const tipoId = fila.querySelector('.externo-tipo-id')?.value;
-                const curpVal = fila.querySelector('.externo-curp')?.value.trim();
-                const pasaporteVal = fila.querySelector('.externo-pasaporte')?.value.trim();
+                const tipoId = fila.querySelector('.externo-tipo-id')?.value?.trim();
+                const identVal = fila.querySelector('.externo-identificacion')?.value?.trim();
                 const nombre = fila.querySelector('.externo-nombre')?.value.trim() || `Persona #${index + 1}`;
 
-                if (tipoId === 'curp' && !curpVal) {
-                    errores.push(`${nombre}: La CURP es obligatoria (o cambie el tipo a Pasaporte).`);
+                if (!tipoId) {
+                    errores.push(`${nombre}: Seleccione el tipo de identificación oficial.`);
                 }
-                if (tipoId === 'pasaporte' && !pasaporteVal) {
-                    errores.push(`${nombre}: El Pasaporte es obligatorio (o cambie el tipo a CURP).`);
+                if (!identVal) {
+                    errores.push(`${nombre}: El número de identificación es obligatorio.`);
+                }
+                if (tipoId === 'curp' && identVal && identVal.length !== 18) {
+                    errores.push(`${nombre}: La CURP debe tener exactamente 18 caracteres.`);
                 }
             });
-        }
+        }    
 
         if (tipoSubmit === 'contratista') {
             const empresa = document.getElementById('empresa').value.trim();
@@ -1365,7 +1422,7 @@ document.querySelector('form').addEventListener('submit', async function(e) {
                     if (campoHoraManual) campoHoraManual.style.display = 'none';
                     if (avisoPase) avisoPase.style.display = 'none';
                     
-                    alert('Atención: algunos empleados no tienen turno. Capture las fechas manualmente.');
+                    ScaModal.warning('Atención', 'Algunos empleados no tienen turno. Capture las fechas manualmente.');
                     e.preventDefault(); // Detener el envío para que el usuario llene las fechas
                 }
             } catch (err) {
@@ -1376,10 +1433,14 @@ document.querySelector('form').addEventListener('submit', async function(e) {
 
     if (errores.length > 0) {
         e.preventDefault();
-        alert('No se puede crear la solicitud:\n\n• ' + errores.join('\n• '));
+        // M5 [ScaModal] — Reemplazamos alert() por ScaModal.error()
+        ScaModal.error('No se puede crear la solicitud', '<ul class="mb-0 text-start"><li>' + errores.join('</li><li>') + '</li></ul>');
         return;
     }
 
+    // M5 [ScaModal] — Mostrar loading antes del submit
+    ScaModal.loading('Creando solicitud', 'Validando datos y enviando a aprobadores...');
+    
     const btn = document.querySelector('button[type="submit"]');
     if (btn) {
         btn.disabled = true;

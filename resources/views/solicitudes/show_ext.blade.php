@@ -4,6 +4,18 @@
 @section('title', 'Solicitud #' . $solicitud->id_solicitud_ext)
 
 @section('content')
+@php
+    // M2: $puedeAprobar se define acá arriba porque se usa en la tabla de externos
+    // (más arriba en el HTML) y en la columna derecha de acciones.
+    $user = Auth::user();
+    $esSuperior = $user->isAdmin() || $user->isSuperadmin();
+    if ($esSuperior) {
+        $puedeAprobar = ($solicitud->estado === 'pendiente');
+    } else {
+        $puedeAprobar = ($solicitud->id_planta_destino === $user->planta_id && $solicitud->estado === 'pendiente' && $user->isAprobador());
+    }
+@endphp
+
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
         <h1 class="h3 mb-0 fw-bold">Solicitud #{{ $solicitud->id_solicitud_ext }}</h1>
@@ -43,20 +55,30 @@
                         <label class="form-label small text-muted">Estado</label>
                         <div>
                             @php
-                                $estadoClass = match($solicitud->estado) {
-                                    'pendiente' => 'bg-warning text-dark',
-                                    'aprobado'  => 'bg-success',
-                                    'rechazado' => 'bg-danger',
-                                    default     => 'bg-secondary',
+                                $estado = $solicitud->estado_actual;
+                                $estadoClass = match($estado) {
+                                    'pendiente'         => 'bg-warning text-dark',
+                                    'aprobado'          => 'bg-success',
+                                    'aprobado_parcial'  => 'bg-info text-dark',
+                                    'rechazado'         => 'bg-danger',
+                                    'expirado'          => 'bg-secondary',
+                                    default             => 'bg-secondary',
                                 };
-                                $estadoLabel = match($solicitud->estado) {
-                                    'pendiente' => 'Pendiente',
-                                    'aprobado'  => 'Aprobado',
-                                    'rechazado' => 'Rechazado',
-                                    default     => $solicitud->estado,
+                                $estadoLabel = match($estado) {
+                                    'pendiente'         => 'Pendiente',
+                                    'aprobado'          => 'Aprobado',
+                                    'aprobado_parcial'  => 'Aprobado parcial',
+                                    'rechazado'         => 'Rechazado',
+                                    'expirado'          => 'Expirada',
+                                    default             => $estado,
                                 };
                             @endphp
                             <span class="badge {{ $estadoClass }} px-3 py-2">{{ $estadoLabel }}</span>
+                            @if($estado === 'expirado')
+                                <small class="d-block mt-1 text-muted">
+                                    {{ $solicitud->motivo_expiracion_label }}
+                                </small>
+                            @endif
                         </div>
                     </div>
                     <div class="col-md-6">
@@ -84,11 +106,10 @@
                 </div>
 
                 {{-- Tabla de externos con sus QRs --}}
-                @if($solicitud->externos->isNotEmpty())
-                <hr>
-                <h6 class="fw-bold mb-3">
-                    <i class="bi bi-people text-success"></i> Personas ({{ $solicitud->externos->count() }})
-                </h6>
+                @if($puedeAprobar)
+                <form method="POST" action="{{ route('solicitudes.aprobar.ext', $solicitud->id_solicitud_ext) }}" id="formAprobarExt" class="sca-form-aprobar-ext">
+                    @csrf
+                @endif
                 <div class="table-responsive">
                     <table class="table table-sm align-middle">
                         <thead class="table-light">
@@ -104,63 +125,64 @@
                             @foreach($solicitud->externos as $detalle)
                             @php
                                 $ext = $detalle->externo;
-                                $qrClass = match($detalle->estado_qr) {
+                                $qrEstado = $detalle->estado_qr_actual;
+                                $qrClass = match($qrEstado) {
+                                    'pendiente'  => 'bg-warning text-dark',
                                     'autorizado' => 'bg-success',
                                     'cancelado'  => 'bg-danger',
+                                    'expirado'   => 'bg-secondary',
                                     default      => 'bg-secondary',
                                 };
+                                $estadoSol = $solicitud->estado_actual;
                                 $puedeCancelarExt = (
-                                    in_array($solicitud->estado, ['pendiente', 'aprobado', 'aprobado_parcial'])
-                                    && $detalle->estado_qr !== 'cancelado'
-                                    && (auth()->user()->isAdmin() || auth()->user()->isSuperadmin()
+                                    in_array($estadoSol, ['aprobado', 'aprobado_parcial'])
+                                    && $qrEstado !== 'cancelado'
+                                    && $qrEstado !== 'expirado'
+                                    && (auth()->user()->isAdmin() || auth()->user()->isSuperadmin() || auth()->user()->isAprobador()
                                         || $solicitud->creador_empleado_id === (int) auth()->user()->username)
                                 );
                             @endphp
                             <tr>
                                 <td>{{ $ext?->nombre_completo ?? '—' }}</td>
                                 <td>
-                                    @if($ext?->curp)
-                                        <span class="badge bg-success mb-1">CURP</span><br>
-                                        <span class="font-monospace small">{{ $ext->curp }}</span>
-                                    @elseif($ext?->pasaporte)
-                                        <span class="badge bg-info text-dark mb-1">Pasaporte</span><br>
-                                        <span class="font-monospace small">{{ $ext->pasaporte }}</span>
+                                    @php
+                                        $tiposLabels = ['curp' => 'CURP', 'credencial_votar' => 'Credencial para votar', 'cedula_profesional' => 'Cédula profesional', 'pasaporte' => 'Pasaporte'];
+                                        $badgeClass = ['curp' => 'bg-success', 'credencial_votar' => 'bg-primary', 'cedula_profesional' => 'bg-info text-dark', 'pasaporte' => 'bg-warning text-dark'];
+                                        $tipoLabel = $tiposLabels[$ext?->tipo_identificacion] ?? '—';
+                                        $tipoClass = $badgeClass[$ext?->tipo_identificacion] ?? 'bg-secondary';
+                                    @endphp
+                                    @if($ext?->identificacion)
+                                        <span class="badge {{ $tipoClass }} mb-1">{{ $tipoLabel }}</span><br>
+                                        <span class="font-monospace small">{{ $ext->identificacion }}</span>
                                     @else
                                         <span class="text-muted">Sin identificación</span>
                                     @endif
                                 </td>
                                 <td>{{ $ext?->telefono ?? '—' }}</td>
-                                <td><span class="badge {{ $qrClass }}">{{ ucfirst($detalle->estado_qr) }}</span></td>
+                                <td><span class="badge {{ $qrClass }}">{{ ucfirst($qrEstado) }}</span></td>
                                 <td>
                                     <div class="d-flex gap-2 align-items-center">
-                                        {{-- Botones de QR (solo si está autorizado) --}}
-                                        @if($detalle->codigo_qr && $detalle->estado_qr === 'autorizado')
-                                            {{-- Contenedor oculto con el SVG del QR --}}
-                                            <div id="credencial-{{ $detalle->id_solicitud_externo_detalle }}" style="display:none; background: white; padding: 60px;">
-                                                {!! QrCode::size(300)->generate($detalle->codigo_qr) !!}
-                                            </div>
-                                            <button type="button" class="btn btn-sm btn-outline-success" title="Copiar PNG"
-                                                    onclick="copiarQrPng('credencial-{{ $detalle->id_solicitud_externo_detalle }}', '{{ addslashes($ext?->nombre_completo ?? 'qr') }}')">
-                                                <i class="bi bi-clipboard"></i>
-                                            </button>
-                                            <button type="button" class="btn btn-sm btn-outline-secondary" title="Descargar PNG"
-                                                    onclick="descargarQrPng('credencial-{{ $detalle->id_solicitud_externo_detalle }}', '{{ addslashes($ext?->nombre_completo ?? 'qr') }}')">
-                                                <i class="bi bi-download"></i>
-                                            </button>
-                                        @endif
+                                        @if($puedeAprobar)
+                                            <select name="estados[{{ $detalle->id_solicitud_externo_detalle }}]" class="form-select form-select-sm w-auto ext-estado">
+                                                <option value="autorizado">Autorizar</option>
+                                                <option value="cancelado">Cancelar</option>
+                                            </select>
+                                        @else
+                                            @if($detalle->codigo_qr && $qrEstado === 'autorizado')
+                                                <a href="{{ route('solicitudes.descargar.png', $detalle->id_solicitud_externo_detalle) }}" class="btn btn-sm btn-outline-secondary" title="Descargar PNG" target="_blank">
+                                                    <i class="bi bi-download"></i>
+                                                </a>
+                                            @endif
 
-                                        {{-- Botón de cancelar --}}
-                                        @if($puedeCancelarExt)
-                                            <form method="POST"
-                                                  action="{{ route('solicitudes.cancel.externo.individual', $solicitud->id_solicitud_ext) }}"
-                                                  onsubmit="return confirm('¿Cancelar a {{ $ext?->nombre_completo ?? 'este externo' }}? Su QR será anulado.')"
-                                                  style="display:inline;">
-                                                @csrf
-                                                <input type="hidden" name="id_solicitud_externo_detalle" value="{{ $detalle->id_solicitud_externo_detalle }}">
-                                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Cancelar este externo">
+                                            @if($puedeCancelarExt)
+                                                {{-- M5 [ScaModal] --}}
+                                                <button type="button" class="btn btn-sm btn-outline-danger sca-cancel-externo" title="Cancelar este externo" 
+                                                        data-action="{{ route('solicitudes.cancel.externo.individual', $solicitud->id_solicitud_ext) }}"
+                                                        data-detalle-id="{{ $detalle->id_solicitud_externo_detalle }}"
+                                                        data-nombre="{{ $ext?->nombre_completo ?? 'este externo' }}">
                                                     <i class="bi bi-x-circle"></i>
                                                 </button>
-                                            </form>
+                                            @endif
                                         @endif
                                     </div>
                                 </td>
@@ -169,6 +191,8 @@
                         </tbody>
                     </table>
                 </div>
+                @if($puedeAprobar)
+                </form>
                 @endif
             </div>
         </div>
@@ -188,7 +212,6 @@
                 <h5 class="mb-0 fw-bold"><i class="bi bi-clock-history text-success"></i> Aprobación</h5>
             </div>
             <div class="card-body">
-                {{-- Timeline (una sola aprobación) --}}
                 <div class="d-flex mb-3">
                     <div class="me-3">
                         @if($solicitud->fecha_aprobacion_destino)
@@ -213,69 +236,38 @@
                     </div>
                 </div>
 
-                {{-- Botones de acción si la puede aprobar --}}
-                @php
-                    $user = Auth::user();
-                    $esSuperior = $user->isAdmin() || $user->isSuperadmin();
-
-                    if ($esSuperior) {
-                        $puedeAprobar = ($solicitud->estado === 'pendiente');
-                    } else {
-                        $puedeAprobar = ($solicitud->id_planta_destino === $user->planta_id && $solicitud->estado === 'pendiente' && $user->isAprobador());
-                    }
-                @endphp
-
                 @if($puedeAprobar)
                     <hr>
-                    <h6 class="fw-bold mb-2">Revisar Personas:</h6>
                     <div class="alert alert-info py-2 small">
                         <i class="bi bi-info-circle"></i> Si cancela alguno, no recibirá QR y no podrá entrar. La solicitud queda <strong>Aprobada Parcial</strong>.
                     </div>
-                    <form method="POST" action="{{ route('solicitudes.aprobar.ext', $solicitud->id_solicitud_ext) }}">
-                        @csrf
-                        @foreach($solicitud->externos as $detalle)
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <small>{{ $detalle->externo?->nombre_completo ?? '—' }}</small>
-                            <select name="estados[{{ $detalle->id_solicitud_externo_detalle }}]" class="form-select form-select-sm w-auto">
-                                <option value="autorizado">Autorizar</option>
-                                <option value="cancelado">Cancelar</option>
-                            </select>
-                        </div>
-                        @endforeach
-                        <button type="submit" class="btn btn-success w-100 mt-3">
-                            <i class="bi bi-check-lg"></i> Confirmar y Generar QRs
-                        </button>
-                    </form>
-                    <button type="button" class="btn btn-outline-danger w-100 mt-2" data-bs-toggle="modal" data-bs-target="#modalRechazarExt{{ $solicitud->id_solicitud_ext }}">
-                        <i class="bi bi-x-lg"></i> Rechazar Toda
+                    <button type="button" class="btn btn-success w-100 mt-3" onclick="document.getElementById('formAprobarExt').dispatchEvent(new Event('submit'))">
+                        <i class="bi bi-check-lg"></i> Confirmar Revisión
                     </button>
 
-                    {{-- Modal de rechazo --}}
-                    <div class="modal fade" id="modalRechazarExt{{ $solicitud->id_solicitud_ext }}" tabindex="-1">
-                        <div class="modal-dialog modal-dialog-centered">
-                            <div class="modal-content sca-modal-content" style="border-radius: 16px;">
-                                <div class="modal-header border-0 pb-0">
-                                    <h5 class="modal-title fw-bold">Rechazar Solicitud #{{ $solicitud->id_solicitud_ext }}</h5>
-                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                </div>
-                                <form method="POST" action="{{ route('solicitudes.rechazar.ext', $solicitud->id_solicitud_ext) }}">
-                                    @csrf
-                                    <div class="modal-body pt-2">
-                                        <label class="form-label">Motivo de rechazo <span class="text-danger">*</span></label>
-                                        <textarea name="motivo_rechazo" class="form-control" rows="3" required placeholder="Explique por qué se rechaza..."></textarea>
-                                    </div>
-                                    <div class="modal-footer border-0 pt-0">
-                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                                        <button type="submit" class="btn btn-danger"><i class="bi bi-x-lg"></i> Confirmar Rechazo</button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-                {{-- V5: Mostrar botón de cancelar también cuando está aprobada --}}
-                @elseif(in_array($solicitud->estado, ['pendiente', 'aprobado']) && $solicitud->creador_empleado_id === (int) $user->username)
+                    {{-- M5 [ScaModal] --}}
+                    <form method="POST" action="{{ route('solicitudes.rechazar.ext', $solicitud->id_solicitud_ext) }}" class="sca-rechazar-ext mt-2">
+                        @csrf
+                        <button type="submit" class="btn btn-outline-danger w-100">
+                            <i class="bi bi-x-lg"></i> Rechazar Toda
+                        </button>
+                    </form>
+                @elseif(in_array($solicitud->estado, ['pendiente', 'aprobado', 'aprobado_parcial']) && ($solicitud->creador_empleado_id === (int) $user->username || $user->isAprobador() || $user->isAdmin() || $user->isSuperadmin()))
                     <hr>
-                    <form method="POST" action="{{ route('solicitudes.cancel.ext', $solicitud->id_solicitud_ext) }}" onsubmit="return confirm('¿Cancelar esta solicitud?')">
+                    @if(in_array($solicitud->estado, ['aprobado', 'aprobado_parcial']))
+                    <a href="{{ route('solicitudes.descargar.credenciales', $solicitud->id_solicitud_ext) }}" class="btn btn-success w-100 mb-2" target="_blank">
+                        <i class="bi bi-file-earmark-pdf-fill"></i> Descargar Todas (PDF)
+                    </a>
+                    {{-- M5 [ScaModal] --}}
+                    <form method="POST" action="{{ route('solicitudes.reenviar.credenciales', $solicitud->id_solicitud_ext) }}" class="sca-reenviar-credenciales mb-2">
+                        @csrf
+                        <button type="submit" class="btn btn-outline-info w-100">
+                            <i class="bi bi-envelope-paper"></i> Reenviar Credenciales
+                        </button>
+                    </form>
+                    @endif
+                    {{-- M5 [ScaModal] --}}
+                    <form method="POST" action="{{ route('solicitudes.cancel.ext', $solicitud->id_solicitud_ext) }}" class="sca-cancelar-solicitud-ext">
                         @csrf
                         <button type="submit" class="btn btn-outline-danger w-100">
                             <i class="bi bi-x-circle"></i> Cancelar Solicitud
@@ -289,101 +281,183 @@
 
 @push('scripts')
 <script>
-async function copiarQrPng(credencialId, nombre) {
-    const credencial = document.getElementById(credencialId);
-    if (!credencial) return;
-    const svg = credencial.querySelector('svg');
-    if (!svg) { alert('No se encontró el QR.'); return; }
+document.addEventListener('DOMContentLoaded', function() {
 
-    try {
-        const pngBlob = await svgToPngBlob(svg, 240);
-        if (!pngBlob) throw new Error('No se pudo generar el PNG');
-
-        if (navigator.clipboard && window.ClipboardItem && ClipboardItem.supports('image/png')) {
-            await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
-            alert('QR copiado al portapapeles.');
-        } else {
-            descargarBlob(pngBlob, nombre + '.png');
-            alert('Su navegador no soporta copiar imágenes. Se descargó el PNG.');
-        }
-    } catch (e) {
-        alert('Error: ' + e.message);
-    }
-}
-
-async function descargarQrPng(credencialId, nombre) {
-    const credencial = document.getElementById(credencialId);
-    if (!credencial) return;
-    const svg = credencial.querySelector('svg');
-    if (!svg) { alert('No se encontró el QR.'); return; }
-
-    try {
-        const pngBlob = await svgToPngBlob(svg, 240);
-        if (!pngBlob) throw new Error('No se pudo generar el PNG');
-        descargarBlob(pngBlob, nombre + '.png');
-    } catch (e) {
-        alert('Error: ' + e.message);
-    }
-}
-
-function svgToPngBlob(svg, size) {
-    return new Promise((resolve, reject) => {
+    async function enviarFormAjax(form) {
         try {
-            const svgClone = svg.cloneNode(true);
-            svgClone.setAttribute('width', size);
-            svgClone.setAttribute('height', size);
-            svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-
-            const svgString = new XMLSerializer().serializeToString(svgClone);
-            const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-            const url = URL.createObjectURL(svgBlob);
-
-            const img = new Image();
-            
-            // FIX: Agregar margen blanco (Quiet Zone) para que la cámara lea mejor
-            const margin = 40; // 40px de margen
-            const canvasSize = size + (margin * 2);
-            
-            img.onload = function() {
-                const canvas = document.createElement('canvas');
-                canvas.width = canvasSize;
-                canvas.height = canvasSize;
-                const ctx = canvas.getContext('2d');
-                
-                // 1. Rellenar todo el canvas con fondo blanco
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, canvasSize, canvasSize);
-                
-                // 2. Dibujar el QR en el centro (con el margen aplicado)
-                ctx.drawImage(img, margin, margin, size, size);
-                
-                URL.revokeObjectURL(url);
-                canvas.toBlob(function(blob) {
-                    if (blob) resolve(blob);
-                    else reject(new Error('Canvas toBlob devolvió null'));
-                }, 'image/png');
-            };
-            img.onerror = function() {
-                URL.revokeObjectURL(url);
-                reject(new Error('No se pudo cargar el SVG como imagen'));
-            };
-            img.src = url;
-        } catch (e) {
-            reject(e);
+            const res = await fetch(form.action, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                    'Accept': 'application/json',
+                },
+                body: new FormData(form),
+            });
+            const data = await res.json();
+            if (data.success) {
+                window.location.replace(data.redirect);
+            } else {
+                ScaModal.close();
+                if (data.errors) {
+                    const errores = Object.values(data.errors).flat();
+                    ScaModal.error('Error de validación', errores.join('<br>'));
+                } else {
+                    ScaModal.error(data.titulo || 'Error', data.mensaje || 'No se pudo procesar.');
+                }
+            }
+        } catch(err) {
+            ScaModal.close();
+            ScaModal.error('Error de conexión', 'No se pudo contactar con el servidor.');
         }
-    });
-}
+    }
 
-function descargarBlob(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+    // 1. Aprobar (con justificación si hay cancelados)
+    const formAprobarExt = document.getElementById('formAprobarExt');
+    if (formAprobarExt) {
+        formAprobarExt.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            let hayCancelados = false;
+            formAprobarExt.querySelectorAll('.ext-estado').forEach(sel => {
+                if (sel.value === 'cancelado') hayCancelados = true;
+            });
+
+            if (hayCancelados) {
+                ScaModal.confirm({
+                    titulo: 'Justificar Rechazos',
+                    mensaje: 'Hay personas marcadas como "Cancelar". Debe ingresar un motivo general para justificar este rechazo.',
+                    tipo: 'warning',
+                    requiereInput: { type: 'textarea', label: 'Motivo de rechazo general', placeholder: 'Explique por qué se cancelan...', required: true, rows: 3 },
+                    textoConfirmar: 'Confirmar y Enviar',
+                    onConfirm: async () => {
+                        const input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = 'motivo_rechazo_general';
+                        input.value = document.getElementById('scaInput')?.value || '';
+                        formAprobarExt.appendChild(input);
+
+                        ScaModal.loading('Procesando aprobación', 'Guardando cambios...');
+                        await enviarFormAjax(formAprobarExt);
+                    }
+                });
+            } else {
+                ScaModal.loading('Procesando aprobación', 'Guardando cambios...');
+                await enviarFormAjax(formAprobarExt);
+            }
+        });
+    }
+
+    // 2. Rechazar
+    document.querySelectorAll('.sca-rechazar-ext').forEach(form => {
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            ScaModal.confirm({
+                titulo: '¿Rechazar solicitud?',
+                mensaje: 'Esta acción no se puede deshacer. La solicitud será rechazada por completo.',
+                tipo: 'danger',
+                requiereInput: { type: 'textarea', label: 'Motivo de rechazo', placeholder: 'Explique por qué se rechaza...', required: true, rows: 3 },
+                textoConfirmar: 'Sí, rechazar',
+                onConfirm: async () => {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = 'motivo_rechazo';
+                    input.value = document.getElementById('scaInput')?.value || '';
+                    form.appendChild(input);
+
+                    ScaModal.loading('Rechazando solicitud', 'Procesando...');
+                    await enviarFormAjax(form);
+                }
+            });
+        });
+    });
+
+    // 3. Cancelar externo individual
+    document.querySelectorAll('.sca-cancel-externo').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const detalleId = this.dataset.detalleId;
+            const nombre = this.dataset.nombre || 'este externo';
+            const action = this.dataset.action;
+
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = action;
+            
+            const tokenInput = document.createElement('input');
+            tokenInput.type = 'hidden';
+            tokenInput.name = '_token';
+            tokenInput.value = document.querySelector('meta[name="csrf-token"]').content;
+            form.appendChild(tokenInput);
+
+            const detInput = document.createElement('input');
+            detInput.type = 'hidden';
+            detInput.name = 'id_solicitud_externo_detalle';
+            detInput.value = detalleId;
+            form.appendChild(detInput);
+            
+            document.body.appendChild(form);
+
+            ScaModal.confirm({
+                titulo: '¿Cancelar externo?',
+                mensaje: `Se cancelará el permiso de <strong>${nombre}</strong>. Su QR será anulado.`,
+                tipo: 'danger',
+                requiereInput: { type: 'textarea', label: 'Motivo de cancelación', placeholder: 'Explique el motivo...', required: true, rows: 3 },
+                textoConfirmar: 'Sí, cancelar',
+                onConfirm: async () => {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = 'motivo_cancelacion';
+                    input.value = document.getElementById('scaInput')?.value || '';
+                    form.appendChild(input);
+
+                    ScaModal.loading('Cancelando externo', 'Procesando...');
+                    await enviarFormAjax(form);
+                }
+            });
+        });
+    });
+
+    // 4. Cancelar solicitud completa
+    document.querySelectorAll('.sca-cancelar-solicitud-ext').forEach(form => {
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            ScaModal.confirm({
+                titulo: '¿Cancelar solicitud?',
+                mensaje: 'La solicitud será cancelada. Los QRs de acceso serán invalidados.',
+                tipo: 'danger',
+                requiereInput: { type: 'textarea', label: 'Motivo de cancelación', placeholder: 'Explique el motivo...', required: true, rows: 3 },
+                textoConfirmar: 'Sí, cancelar',
+                onConfirm: async () => {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = 'motivo_rechazo';
+                    input.value = document.getElementById('scaInput')?.value || '';
+                    form.appendChild(input);
+
+                    ScaModal.loading('Cancelando solicitud', 'Procesando...');
+                    await enviarFormAjax(form);
+                }
+            });
+        });
+    });
+
+    // 5. Reenviar credenciales
+    document.querySelectorAll('.sca-reenviar-credenciales').forEach(form => {
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            ScaModal.confirm({
+                titulo: '¿Reenviar credenciales?',
+                mensaje: 'Se enviarán los correos con los QRs de acceso al creador de la solicitud.',
+                tipo: 'info',
+                textoConfirmar: 'Sí, reenviar',
+                onConfirm: async () => {
+                    ScaModal.loading('Enviando credenciales', 'Procesando...');
+                    await enviarFormAjax(form);
+                }
+            });
+        });
+    });
+
+});
 </script>
 @endpush
 

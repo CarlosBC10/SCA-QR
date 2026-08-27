@@ -39,7 +39,8 @@
     </div>
 </div>
 
-<form method="POST" action="{{ route('empleados.update', $empleado->id_empleado) }}">
+{{-- M2 [ScaModal] — Agregamos id="form-edit-empleado" para que el JS lo intercepte --}}
+<form method="POST" action="{{ route('empleados.update', $empleado->id_empleado) }}" id="form-edit-empleado">
     @csrf
     @method('PUT')
 
@@ -147,10 +148,118 @@
     </div>
 
     <div class="d-flex gap-2">
-        <button type="submit" class="btn btn-success">
+        <button type="submit" class="btn btn-success" id="btn-guardar-config">
             <i class="bi bi-check-circle"></i> Guardar Configuración
         </button>
         <a href="{{ route('empleados.index') }}" class="btn btn-outline-secondary">Cancelar</a>
     </div>
 </form>
+
+@push('scripts')
+<script>
+    // ============================================================
+    // M2 [ScaModal] — Intercept form submit for AJAX + confirm + loading
+    //
+    // FLUJO:
+    //   1. Usuario completa config y clic en "Guardar Configuración"
+    //   2. JS intercepta el submit (e.preventDefault())
+    //   3. ScaModal.confirm con resumen de lo que se va a cambiar
+    //   4. Si confirma: ScaModal.loading "Guardando configuración..."
+    //   5. fetch() AJAX al controller
+    //   6. Controller procesa y devuelve JSON
+    //   7. Loading se cierra, ScaModal.success con detalles
+    //   8. Click "Aceptar" → redirect a empleados.index
+    // ============================================================
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('form-edit-empleado');
+        if (!form) return;
+
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const btn = document.getElementById('btn-guardar-config');
+            const originalBtnHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Procesando...';
+
+            // ===== Construir resumen para el confirm =====
+            const tipoSelect = form.querySelector('select[name="tipo_empleado"]');
+            const tipoNombre = tipoSelect.options[tipoSelect.selectedIndex].text;
+
+            const plantaSelect = form.querySelector('select[name="id_planta"]');
+            let plantaTexto = 'No editable';
+            let plantaForzada = false;
+            if (plantaSelect) {
+                const opt = plantaSelect.options[plantaSelect.selectedIndex];
+                plantaTexto = opt.text;
+                plantaForzada = opt.value !== 'auto' && opt.value !== '';
+            }
+
+            const resetManual = form.querySelector('input[name="resetear_manual"]')?.checked;
+
+            // Tomar el nombre del empleado del H1 de la página
+            const nombreEmpleado = document.querySelector('p.text-muted')?.textContent.trim() || 'este empleado';
+
+            // Construir mensaje del confirm
+            let mensaje = `<div class="text-start">`;
+            mensaje += `<div class="mb-2"><strong>Empleado:</strong> ${nombreEmpleado}</div>`;
+            mensaje += `<div class="mb-2"><strong>Tipo de empleado:</strong> ${tipoNombre}</div>`;
+            mensaje += `<div class="mb-2"><strong>Planta:</strong> ${plantaTexto}</div>`;
+            if (resetManual) {
+                mensaje += `<div class="mb-2 text-warning"><i class="bi bi-arrow-clockwise"></i> Se reseteará el contador de manuales a 4.</div>`;
+            }
+            mensaje += `</div>`;
+
+            // ===== Mostrar confirm =====
+            ScaModal.confirm({
+                titulo: '¿Guardar configuración?',
+                mensaje: mensaje,
+                tipo: plantaForzada ? 'warning' : 'warning',
+                textoConfirmar: 'Sí, guardar',
+                textoCancelar: 'Cancelar',
+                onConfirm: async () => {
+                    // Mostrar loading
+                    ScaModal.loading('Guardando configuración', 'Actualizando datos del empleado...');
+
+                    try {
+                        const response = await fetch(form.action, {
+                            method: 'POST',
+                            headers: {
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                                'Accept': 'application/json',
+                            },
+                            body: new FormData(form),
+                        });
+
+                        const data = await response.json();
+
+                        if (data.success) {
+                            // Option E: NO cerramos el loading. Redirect directo.
+                            // El success se mostrará en empleados.index vía flash.
+                            window.location.href = data.redirect;
+                        } else {
+                            // Error: cerrar loading, mostrar error, rehabilitar botón
+                            ScaModal.close();
+                            ScaModal.error(data.titulo || 'Error', data.mensaje || 'No se pudo guardar.');
+                            btn.disabled = false;
+                            btn.innerHTML = originalBtnHtml;
+                        }
+                    } catch (err) {
+                        ScaModal.close();
+                        ScaModal.error('Error de conexión', 'No se pudo contactar con el servidor. Inténtalo de nuevo.');
+                        btn.disabled = false;
+                        btn.innerHTML = originalBtnHtml;
+                    }
+                },
+                onCancel: () => {
+                    // Si cancela, rehabilitar el botón
+                    btn.disabled = false;
+                    btn.innerHTML = originalBtnHtml;
+                }
+            });
+        });
+    });
+</script>
+@endpush
+
 @endsection

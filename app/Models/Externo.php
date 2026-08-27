@@ -1,92 +1,120 @@
 <?php
 // app/Models/Externo.php
 //
-// CAMBIO V5:
-//   - Eliminadas columnas 'tipo' y 'empresa'.
-//   - Solo guarda datos personales: curp, pasaporte, nombre_completo, telefono, foto.
-//   - La empresa ahora vive en solicitudes_ext.
+// MODELO: Externo
+// TABLA:  externos  (BD sca)
+//
+// Representa a una persona externa a Fruitex (visitante, contratista, etc.)
+// que va a ingresar a una planta y necesita una solicitud + QR.
+//
+// ⚠️ CAMBIO V7 (unificación de identificación oficial):
+//   Antes tenía dos columnas separadas: 'curp' (UNIQUE) y 'pasaporte'.
+//   Ahora tiene un campo unificado:
+//     - tipo_identificacion: enum('curp','credencial_votar','cedula_profesional','pasaporte')
+//     - identificacion:      varchar(50) con el valor real del documento
+//   UNIQUE compuesta en (tipo_identificacion, identificacion).
+//   Esto simplifica el formulario (un solo campo + select de tipo) y
+//   permite aceptar 4 tipos de identificación oficial.
 
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 
 class Externo extends Model
 {
-    protected $table = 'externos';
+    protected $table      = 'externos';
     protected $primaryKey = 'id_externos';
 
+    // Campos asignables masivamente.
+    // Ya NO hay 'curp' ni 'pasaporte' como columnas separadas.
     protected $fillable = [
-        'curp', 'pasaporte', 'nombre_completo', 'telefono', 'foto',
+        'tipo_identificacion',  // 'curp' | 'credencial_votar' | 'cedula_profesional' | 'pasaporte'
+        'identificacion',       // valor del documento
+        'nombre_completo',
+        'telefono',
+        'foto',
     ];
 
-    public function detallesSolicitud()
+    protected $casts = [
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+    ];
+
+    // ============================================================
+    // RELACIONES
+    // ============================================================
+
+    public function solicitudesDetalles()
     {
         return $this->hasMany(SolicitudExternoDetalle::class, 'id_externos', 'id_externos');
     }
 
-    /**
-     * Busca un externo por CURP o Pasaporte; si no existe lo crea.
-     *
-     * FIX G-2: Normaliza el nombre a Title Case.
-     * FIX: Si no hay identificación (ni CURP ni pasaporte), crea nuevo en limpio.
-     */
-    public static function buscarOcrear(array $datos): self
+    // Accessor: nombre completo en Title Case
+    public function getNombreCompletoFormateadoAttribute(): string
     {
-        // Normalizar nombre a Title Case
-        $nombreNormalizado = isset($datos['nombre_completo'])
-            ? self::titleCaseNombre($datos['nombre_completo'])
-            : null;
-        
-        $curpNormalizada = isset($datos['curp']) && $datos['curp'] !== ''
-            ? strtoupper(trim($datos['curp']))
-            : null;
-        
-        $pasaporteNormalizado = isset($datos['pasaporte']) && $datos['pasaporte'] !== ''
-            ? strtoupper(trim($datos['pasaporte']))
-            : null;
+        return Str::title(mb_strtolower($this->nombre_completo));
+    }
 
-        // 1. Si hay CURP, dedup por CURP
-        if ($curpNormalizada !== null) {
-            return self::firstOrCreate(
-                ['curp' => $curpNormalizada],
-                [
-                    'nombre_completo' => $nombreNormalizado,
-                    'pasaporte'       => $pasaporteNormalizado,
-                    'telefono'        => $datos['telefono'] ?? null,
-                ]
-            );
-        }
+    // ============================================================
+    // HELPERS ESTÁTICOS
+    // ============================================================
 
-        // 2. Si hay pasaporte, dedup por pasaporte
-        if ($pasaporteNormalizado !== null) {
-            return self::firstOrCreate(
-                ['pasaporte' => $pasaporteNormalizado],
-                [
-                    'nombre_completo' => $nombreNormalizado,
-                    'curp'            => null,
-                    'telefono'        => $datos['telefono'] ?? null,
-                ]
-            );
-        }
-
-        // 3. Sin identificación: crear nuevo en limpio
-        return self::create([
-            'curp'            => null,
-            'pasaporte'       => null,
-            'nombre_completo' => $nombreNormalizado,
-            'telefono'        => $datos['telefono'] ?? null,
-        ]);
+    /**
+     * Etiquetas legibles para los tipos de identificación.
+     * Se usa en vistas (formularios y show) para mostrar al usuario.
+     */
+    public static function tiposIdentificacion(): array
+    {
+        return [
+            'curp'                => 'CURP',
+            'credencial_votar'    => 'Credencial para votar (INE/IFE)',
+            'cedula_profesional'  => 'Cédula profesional',
+            'pasaporte'           => 'Pasaporte (extranjero)',
+        ];
     }
 
     /**
-     * Convierte un nombre a Title Case, preservando acentos.
+     * Devuelve la etiqueta legible del tipo de identificación del externo.
      */
-    public static function titleCaseNombre(?string $nombre): ?string
+    public function getTipoIdentificacionLabelAttribute(): string
     {
-        if (!$nombre) return null;
-        $nombre = trim($nombre);
-        $normalizado = mb_convert_case($nombre, MB_CASE_TITLE, 'UTF-8');
-        $normalizado = preg_replace('/\s+/', ' ', $normalizado);
-        return $normalizado ?: null;
+        return self::tiposIdentificacion()[$this->tipo_identificacion]
+            ?? ucfirst(str_replace('_', ' ', $this->tipo_identificacion));
+    }
+
+    /**
+     * Busca un externo por tipo + valor de identificación, o lo crea si no existe.
+     *
+     * @param array $data  Debe traer: tipo_identificacion, identificacion,
+     *                     nombre_completo, telefono (opcional).
+     * @return self
+     */
+    public static function buscarOcrear(array $data): self
+    {
+        $tipo  = strtolower(trim($data['tipo_identificacion'] ?? ''));
+        $valor = trim($data['identificacion'] ?? '');
+
+        if (!$tipo || !$valor) {
+            throw new \InvalidArgumentException(
+                'buscarOcrear requiere tipo_identificacion e identificacion.'
+            );
+        }
+
+        // Si es CURP, normalizar a MAYÚSCULAS (las CURPs siempre van en mayúsculas)
+        if ($tipo === 'curp') {
+            $valor = strtoupper($valor);
+        }
+
+        return self::firstOrCreate(
+            [
+                'tipo_identificacion' => $tipo,
+                'identificacion'      => $valor,
+            ],
+            [
+                'nombre_completo' => $data['nombre_completo'] ?? '',
+                'telefono'         => $data['telefono'] ?? null,
+            ]
+        );
     }
 }

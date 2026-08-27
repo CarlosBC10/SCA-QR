@@ -33,6 +33,11 @@ use App\Http\Controllers\CatalogoController;
 // ============================================================
 // Redirige a login o al dashboard según el rol.
 Route::get('/', function () {
+    // M2 [ScaModal] — reflash() preserva los flashes para el SIGUIENTE redirect.
+    // Necesario porque esta ruta redirige al dashboard, y sin reflash los
+    // flashes (como sca_modal) se pierden en esa segunda redirección.
+    session()->reflash();
+
     if (Auth::check()) {
         $rol = Auth::user()->rol->nombre;
         $route = match($rol) {
@@ -152,6 +157,9 @@ Route::middleware(['auth', 'debe_cambiar_password'])->group(function () {
         Route::get('/api/justificaciones', [CatalogoController::class, 'justificaciones'])->name('api.justificaciones');
         // Resetear contraseña desde el panel de admin
         Route::post('/usuarios/{usuario}/reset-password', [\App\Http\Controllers\UsuarioController::class, 'resetPassword'])->name('usuarios.reset-password');
+
+        // M2 [ScaModal] — Cambiar contraseña de guardia directamente (sin correo).
+        Route::post('/usuarios/{usuario}/cambiar-password-guardia', [\App\Http\Controllers\UsuarioController::class, 'cambiarPasswordGuardia'])->name('usuarios.cambiar-password-guardia');
     });
 
     // ------------------------------------------------------------
@@ -198,6 +206,11 @@ Route::middleware(['auth', 'debe_cambiar_password'])->group(function () {
         Route::get('/clasificaciones', [ClasificacionPlantaController::class, 'index'])->name('clasificaciones.index');
         Route::put('/clasificaciones/{idClasificacion}', [ClasificacionPlantaController::class, 'update'])->name('clasificaciones.update');
         Route::delete('/clasificaciones/{idClasificacion}', [ClasificacionPlantaController::class, 'destroy'])->name('clasificaciones.destroy');
+
+        // M2 [ScaModal] — Ruta AJAX para obtener excepciones
+        // (empleados con planta_forzada=true que no se actualizaron al cambiar mapeo)
+        Route::get('/clasificaciones/{idClasificacion}/excepciones', [ClasificacionPlantaController::class, 'excepciones'])
+            ->name('clasificaciones.excepciones');
     });
 
     // ------------------------------------------------------------
@@ -218,6 +231,21 @@ Route::middleware(['auth', 'debe_cambiar_password'])->group(function () {
         Route::get('/solicitudes/historial', [SolicitudController::class, 'historial'])->name('solicitudes.historial');
     });
 
+    // Descargar credenciales en PDF (todas juntas)
+    Route::get('/solicitudes/ext/{solicitud}/descargar-credenciales', 
+        [\App\Http\Controllers\SolicitudController::class, 'descargarCredenciales'])
+        ->name('solicitudes.descargar.credenciales');
+
+    // Descargar PNG individual
+    Route::get('/solicitudes/credencial/{idDetalle}/png', 
+        [\App\Http\Controllers\SolicitudController::class, 'descargarCredencialPng'])
+        ->name('solicitudes.descargar.png');
+
+    // Reenviar credenciales por correo
+    Route::post('/solicitudes/ext/{solicitud}/reenviar-credenciales', 
+        [\App\Http\Controllers\SolicitudController::class, 'reenviarCredenciales'])
+        ->name('solicitudes.reenviar.credenciales');
+
     // Bandeja de aprobaciones (pendientes)
     Route::get('/solicitudes/bandeja', [SolicitudController::class, 'bandeja'])->name('solicitudes.bandeja');
 
@@ -227,8 +255,9 @@ Route::middleware(['auth', 'debe_cambiar_password'])->group(function () {
 
     // APIs de búsqueda para el formulario
     Route::get('/solicitudes/buscar-empleado', [SolicitudController::class, 'buscarEmpleado'])->name('solicitudes.buscar-empleado');
-    Route::get('/solicitudes/buscar-externo', [SolicitudController::class, 'buscarExternoPorCurp'])->name('solicitudes.buscar-externo');
-    Route::get('/solicitudes/buscar-externo-pasaporte', [SolicitudController::class, 'buscarExternoPorPasaporte'])->name('solicitudes.buscar-externo-pasaporte');
+    // CAMBIO V7: unificadas las dos rutas viejas en una sola.
+    Route::get('/solicitudes/buscar-externo-identificacion', [SolicitudController::class, 'buscarExternoPorIdentificacion'])
+         ->name('solicitudes.buscar-externo-identificacion');
 
     // Ver detalle (split int/ext)
     Route::get('/solicitudes/int/{solicitud}', [SolicitudController::class, 'showInt'])->name('solicitudes.show.int');

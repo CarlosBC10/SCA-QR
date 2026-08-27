@@ -179,7 +179,7 @@ class UsuarioController extends Controller
                 'id_rol' => 'No tiene permisos para asignar este rol.',
             ]);
         }
-
+        
         // FIX I-10: Generar contraseña temporal y preparar datos
         $passwordTemporal = $this->generarPasswordTemporal();
         $emailEmp = $request->input('email_emp');
@@ -194,6 +194,14 @@ class UsuarioController extends Controller
             ));
         } catch (\Exception $e) {
             LogSistema::registrar('ERROR_MAIL', "No se pudo enviar correo a {$emailEmp}: " . $e->getMessage());
+            // M2 [ScaModal] — Si es AJAX, devolver JSON con error
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'titulo'  => 'Error de correo',
+                    'mensaje' => "No se pudo enviar el correo a {$emailEmp}. Verifique la configuración o intente con otro correo.",
+                ], 422);
+            }
             return back()->withErrors(['email_emp' => 'No se pudo enviar el correo a ' . $emailEmp . '. Verifique la configuración o intente con otro correo.'])->withInput();
         }
 
@@ -224,8 +232,28 @@ class UsuarioController extends Controller
             "Empleado {$empleado->id_empleado} ({$empleado->nombre_completo}) con rol {$rol->nombre}"
         );
 
-        return redirect()->route('usuarios.index')
-            ->with('success', "Usuario {$empleado->nombre_completo} creado. Se envió la contraseña temporal a {$emailEmp}.");
+        // M2 [ScaModal] — Construir mensaje detallado
+        $mensaje = "<div class='text-start'>";
+        $mensaje .= "<div class='mb-2'><strong>Usuario creado:</strong> {$empleado->nombre_completo} ({$empleado->id_empleado})</div>";
+        $mensaje .= "<div class='mb-2'><strong>Rol:</strong> {$rol->nombre}</div>";
+        $mensaje .= "<div class='mb-2'><strong>Correo enviado a:</strong> {$emailEmp}</div>";
+        $mensaje .= "<div class='mt-2 alert alert-info py-2 mb-0'><i class='bi bi-info-circle-fill'></i> La contraseña temporal fue enviada por correo. El usuario debe cambiarla al iniciar sesión.</div>";
+        $mensaje .= "</div>";
+
+        // Option E: Setear flash en sesión ANTES de devolver JSON.
+        session()->flash('sca_modal', sca_modal_flash('success', 'Usuario creado', $mensaje));
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success'  => true,
+                'redirect' => route('usuarios.index'),
+            ]);
+        }
+
+        return redirect()->route('usuarios.index')->with(
+            'sca_modal',
+            sca_modal_flash('success', 'Usuario creado', $mensaje)
+        );
     }
 
     /**
@@ -269,13 +297,11 @@ class UsuarioController extends Controller
 
         $rolGuardia = RolSca::where('nombre', 'Guardia')->firstOrFail();
 
-        // FIX I-9: Guardias NO llevan prefijo 'temp:'. Se les entrega la contraseña personalmente.
-        $passwordTemporal = $this->generarPasswordTemporal();
-
+        // M2 [ScaModal] — Los guardias NO reciben correo. El admin define la contraseña
+        // directamente en el form (no es temporal, no tiene prefijo 'temp:').
         UsuarioSca::create([
             'username'                => $idGuardia,
-            'email_emp'               => $request->input('email_emp'), // Guardamos el correo institucional
-            'password'                => Hash::make($passwordTemporal), // Hash normal, sin prefijo temp
+            'password'                => Hash::make($request->password),
             'id_rol'                  => $rolGuardia->id_rol,
         ]);
 
@@ -284,9 +310,33 @@ class UsuarioController extends Controller
             "Guardia {$idGuardia} ({$request->nombre_completo})"
         );
 
-        // Los guardias no reciben correo de credenciales, se les entrega personalmente
-        return redirect()->route('usuarios.index')
-            ->with('warning', "Guardia {$request->nombre_completo} ({$idGuardia}) creado. Contraseña temporal: {$passwordTemporal} (entréguela personalmente).");
+        // M2 [ScaModal] — Mensaje success con la contraseña visible.
+        // La leemos del request (no la guardamos en sesión porque es sensible).
+        $passwordIngresada = $request->input('password');
+        $mensaje = "<div class='text-start'>";
+        $mensaje .= "<div class='mb-2'><strong>Guardia creado:</strong> {$request->nombre_completo} ({$idGuardia})</div>";
+        $mensaje .= "<div class='mb-2'><strong>Planta:</strong> " . (\App\Services\PlantaCacheService::nombrePlanta($plantaId)) . "</div>";
+        $mensaje .= "<div class='alert alert-success mt-3 mb-0 py-2'><i class='bi bi-key-fill'></i> ";
+        $mensaje .= "<strong>Contraseña:</strong> <code class='fs-5'>{$passwordIngresada}</code><br>";
+        $mensaje .= "<small>Entréguela personalmente al guardia. No se envía por correo.</small></div>";
+        $mensaje .= "</div>";
+
+        // Option E: Setear flash en sesión.
+        session()->flash('sca_modal', sca_modal_flash('success', 'Guardia creado', $mensaje));
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success'  => true,
+                'redirect' => route('usuarios.index'),
+            ]);
+        }
+
+        // Fallback: redirect con flash (para navegadores sin JS).
+        // Usamos 'success' (no 'warning') porque ya no hay contraseña temporal que mostrar.
+        return redirect()->route('usuarios.index')->with(
+            'sca_modal',
+            sca_modal_flash('success', 'Guardia creado', $mensaje)
+        );
     }
 
     public function edit(UsuarioSca $usuario)
@@ -342,6 +392,20 @@ class UsuarioController extends Controller
             ]);
         }
 
+        // M2: Validar que el rol coincida con el tipo de usuario.
+        // - Guardias solo pueden tener rol de Guardia.
+        // - Empleados internos NO pueden tener rol de Guardia.
+        if ($usuario->esGuardia() && $rol->nombre !== 'Guardia') {
+            throw ValidationException::withMessages([
+                'id_rol' => 'Los guardias solo pueden tener rol de Guardia.',
+            ]);
+        }
+        if (!$usuario->esGuardia() && $rol->nombre === 'Guardia') {
+            throw ValidationException::withMessages([
+                'id_rol' => 'Los empleados internos no pueden tener rol de Guardia.',
+            ]);
+        }
+
         // Datos básicos
         $datos = [
             'id_rol' => $rol->id_rol,
@@ -383,8 +447,33 @@ class UsuarioController extends Controller
             "Usuario {$usuario->username} actualizado"
         );
 
-        return redirect()->route('usuarios.index')
-            ->with('success', "Usuario {$usuario->username} actualizado correctamente.");
+        // M2 [ScaModal] — Construir mensaje detallado.
+        $nombreUsuario = $usuario->nombre_completo ?? $usuario->username;
+        $mensaje = "<div class='text-start'>";
+        $mensaje .= "<div class='mb-2'><strong>Usuario:</strong> {$nombreUsuario} ({$usuario->username})</div>";
+        $mensaje .= "<div class='mb-2'><strong>Rol:</strong> {$rol->nombre}</div>";
+        if ($request->filled('password')) {
+            $mensaje .= "<div class='mb-2'><i class='bi bi-key text-success'></i> Contraseña actualizada</div>";
+        }
+        if ($activar && $usuario->fecha_baja === null) {
+            $mensaje .= "<div class='mb-2'><i class='bi bi-check-circle text-success'></i> Usuario activado</div>";
+        }
+        $mensaje .= "</div>";
+
+        // Option E: Setear flash en sesión.
+        session()->flash('sca_modal', sca_modal_flash('success', 'Usuario actualizado', $mensaje));
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success'  => true,
+                'redirect' => route('usuarios.index'),
+            ]);
+        }
+
+        return redirect()->route('usuarios.index')->with(
+            'sca_modal',
+            sca_modal_flash('success', 'Usuario actualizado', $mensaje)
+        );
     }
 
     /**
@@ -398,6 +487,14 @@ class UsuarioController extends Controller
 
         // No puede desactivarse a sí mismo
         if ($usuario->id_usuario_sca === $user->id_usuario_sca) {
+            // M2 [ScaModal] — Si es AJAX, devolver JSON con error
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'titulo'  => 'Acción no permitida',
+                    'mensaje' => 'No puede desactivar su propia cuenta.',
+                ], 403);
+            }
             return back()->withErrors(['error' => 'No puede desactivar su propia cuenta.']);
         }
 
@@ -412,8 +509,27 @@ class UsuarioController extends Controller
             "Usuario {$usuario->username} desactivado"
         );
 
-        return redirect()->route('usuarios.index')
-            ->with('success', "Usuario {$usuario->username} desactivado.");
+        // M2 [ScaModal] — Construir mensaje.
+        $nombreUsuario = $usuario->nombre_completo ?? $usuario->username;
+        $mensaje = "<div class='text-start'>";
+        $mensaje .= "<div class='mb-2'><strong>Usuario desactivado:</strong> {$nombreUsuario} ({$usuario->username})</div>";
+        $mensaje .= "<div class='alert alert-info mt-2 mb-0 py-2'><i class='bi bi-info-circle-fill'></i> El usuario fue desactivado y no podrá iniciar sesión. Puede reactivarse cuando sea necesario.</div>";
+        $mensaje .= "</div>";
+
+        // Option E: Setear flash en sesión.
+        session()->flash('sca_modal', sca_modal_flash('success', 'Usuario desactivado', $mensaje));
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success'  => true,
+                'redirect' => route('usuarios.index'),
+            ]);
+        }
+
+        return redirect()->route('usuarios.index')->with(
+            'sca_modal',
+            sca_modal_flash('success', 'Usuario desactivado', $mensaje)
+        );
     }
 
     /**
@@ -533,6 +649,14 @@ class UsuarioController extends Controller
         }
 
         if (!$usuario->email_emp) {
+            // M2 [ScaModal] — Si es AJAX, devolver JSON con error
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'titulo'  => 'Sin correo',
+                    'mensaje' => 'El usuario no tiene correo institucional registrado. Configure un correo antes de resetear la contraseña.',
+                ], 422);
+            }
             return back()->withErrors(['error' => 'El usuario no tiene correo institucional registrado.']);
         }
 
@@ -549,11 +673,113 @@ class UsuarioController extends Controller
             ));
         } catch (\Exception $e) {
             LogSistema::registrar('ERROR_MAIL', "No se pudo enviar correo de reseteo a {$usuario->email_emp}: " . $e->getMessage());
+            // M2 [ScaModal] — Si es AJAX, devolver JSON con error
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'titulo'  => 'Error de correo',
+                    'mensaje' => 'No se pudo enviar el correo. Intente más tarde o verifique la configuración.',
+                ], 422);
+            }
             return back()->withErrors(['error' => 'No se pudo enviar el correo. Intente más tarde.']);
         }
 
         LogSistema::registrar('RESETEO_PASSWORD', "El admin {$user->username} reseteó la contraseña de {$usuario->username}.");
 
-        return back()->with('success', "Se envió una contraseña temporal a {$usuario->email_emp}.");
+        // M2 [ScaModal] — Construir mensaje.
+        $nombreUsuario = $usuario->nombre_completo ?? $usuario->username;
+        $mensaje = "<div class='text-start'>";
+        $mensaje .= "<div class='mb-2'><strong>Usuario:</strong> {$nombreUsuario} ({$usuario->username})</div>";
+        $mensaje .= "<div class='mb-2'><strong>Correo enviado a:</strong> {$usuario->email_emp}</div>";
+        $mensaje .= "<div class='alert alert-info mt-2 mb-0 py-2'><i class='bi bi-info-circle-fill'></i> Se envió una nueva contraseña temporal. El usuario debe cambiarla al iniciar sesión.</div>";
+        $mensaje .= "</div>";
+
+        // Option E: Setear flash en sesión. Usamos back() para volver a la lista.
+        session()->flash('sca_modal', sca_modal_flash('success', 'Contraseña reseteada', $mensaje));
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success'  => true,
+                'redirect' => route('usuarios.index'),
+            ]);
+        }
+
+        return back()->with(
+            'sca_modal',
+            sca_modal_flash('success', 'Contraseña reseteada', $mensaje)
+        );
+    }
+
+    /**
+     * M2 [ScaModal] — Cambiar contraseña de un guardia directamente.
+     *
+     * Los guardias NO tienen correo, por lo que no podemos usar resetPassword()
+     * (que envía email con temporal). En su lugar, el admin define la nueva
+     * contraseña directamente.
+     *
+     * No usa prefijo 'temp:' porque no es temporal — es la contraseña final
+     * que el admin le entrega personalmente al guardia.
+     */
+    public function cambiarPasswordGuardia(UsuarioSca $usuario, Request $request)
+    {
+        $user = $request->user();
+
+        // Permisos: Admin/Super pueden cambiar a cualquiera. Aprobador solo a los de su planta.
+        if (!$user->isAdmin() && !$user->isSuperadmin()) {
+            if ($user->isAprobador() && $usuario->planta_id !== $user->planta_id) {
+                abort(403, 'No puede cambiar la contraseña de guardias de otra planta.');
+            }
+        }
+
+        // Verificar que el usuario sea un guardia
+        if (!$usuario->esGuardia()) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'titulo'  => 'Error',
+                    'mensaje' => 'Este usuario no es un guardia. Use la opción de reseteo por correo.',
+                ], 422);
+            }
+            return back()->withErrors(['error' => 'Este usuario no es un guardia.']);
+        }
+
+        // Validar la contraseña (con confirmación)
+        $request->validate([
+            'password' => ['required', 'string', 'confirmed', \Illuminate\Validation\Rules\Password::min(8)->mixedCase()->numbers()->symbols()],
+        ], [
+            'password.required'  => 'La contraseña es obligatoria.',
+            'password.confirmed' => 'Las contraseñas no coinciden.',
+        ]);
+
+        // Guardar la nueva contraseña (sin prefijo temp:)
+        $usuario->password = Hash::make($request->password);
+        $usuario->save();
+
+        LogSistema::registrar('CAMBIO_PASSWORD_GUARDIA', "El admin {$user->username} cambió la contraseña del guardia {$usuario->username}.");
+
+        // Construir mensaje con la contraseña visible.
+        $passwordIngresada = $request->input('password');
+        $nombreUsuario = $usuario->nombre_completo ?? $usuario->username;
+        $mensaje = "<div class='text-start'>";
+        $mensaje .= "<div class='mb-2'><strong>Guardia:</strong> {$nombreUsuario} ({$usuario->username})</div>";
+        $mensaje .= "<div class='alert alert-success mt-2 mb-0 py-2'><i class='bi bi-key-fill'></i> ";
+        $mensaje .= "<strong>Contraseña:</strong> <code class='fs-5'>{$passwordIngresada}</code><br>";
+        $mensaje .= "<small>La contraseña fue actualizada. Entréguela personalmente al guardia.</small></div>";
+        $mensaje .= "</div>";
+
+        // Option E: Setear flash en sesión.
+        session()->flash('sca_modal', sca_modal_flash('success', 'Contraseña actualizada', $mensaje));
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success'  => true,
+                'redirect' => route('usuarios.index'),
+            ]);
+        }
+
+        return back()->with(
+            'sca_modal',
+            sca_modal_flash('success', 'Contraseña actualizada', $mensaje)
+        );
     }
 }

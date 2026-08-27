@@ -95,19 +95,41 @@ class LoginController extends Controller
         // V5: Se eliminó la columna 'id_guardias' de usuarios_sca.
         // El enlace con guardias ahora es por 'username' (no requiere campo separado).
         // Para empleados internos, el username es simplemente su id_empleado.
+
+        // ⚠️ FIX CRÍTICO C2 (auditoría V6):
+        // Antes este método usaba la variable $rolSuperadmin SIN haberla asignado
+        // previamente (solo existía el `use App\Models\RolSca;` arriba, pero
+        // nunca se hacía RolSca::where(...)->first()). Eso provocaba un fatal
+        // "Undefined variable $rolSuperadmin" en el primer registro, así que
+        // el sistema NUNCA podía inicializarse en una instalación limpia.
+        //
+        // Ahora consultamos el rol 'Superadmin' en la BD. Si no existe (porque
+        // no se corrió el seeder), lanzamos una excepción clara con instrucciones.
+        $rolSuperadmin = RolSca::where('nombre', 'Superadmin')->first();
+        if (!$rolSuperadmin) {
+            throw new \RuntimeException(
+                'No existe el rol "Superadmin" en la tabla roles_sca. '
+                . 'Ejecute el seeder: php artisan db:seed --class=RolesScaSeeder'
+            );
+        }
+
         UsuarioSca::create([
             'username'    => (string) $request->id_empleado,
             'password'    => Hash::make($request->password),
             'id_rol'      => $rolSuperadmin->id_rol,
         ]);
 
+
         LogSistema::registrar(
             'REGISTER_INITIAL',
             'Registro inicial de Superadmin (empleado ' . $request->id_empleado . ')'
         );
 
-        return redirect()->route('login')
-            ->with('success', 'Superadmin creado. Ahora puede iniciar sesion.');
+        // M2 [ScaModal] — Modal verde de éxito en la pantalla de login.
+        return redirect()->route('login')->with(
+            'sca_modal',
+            sca_modal_flash('success', 'Superadmin creado', 'Ahora puede iniciar sesión con sus credenciales.')
+        );
     }
 
     /**
@@ -161,8 +183,13 @@ class LoginController extends Controller
                     // Esto evita depender del middleware global si hubo algún problema de registro
                     RateLimiter::clear($throttleKey);
                     $request->session()->regenerate();
-                    return redirect()->route('password.cambiar')
-                        ->with('warning', 'Debe cambiar su contraseña temporal antes de continuar.');
+                    // M2 [ScaModal] — Modal ámbar de advertencia en cambiar_password.
+                    // Antes este warning no se veía porque el layout viejo solo leía
+                    // session('success') y session('error'). Ahora con sca_modal se ve.
+                    return redirect()->route('password.cambiar')->with(
+                        'sca_modal',
+                        sca_modal_flash('warning', 'Contraseña temporal', 'Debe cambiar su contraseña temporal antes de continuar.')
+                    );
                 }
             } else {
                 // Password normal: usar Auth::attempt estándar
@@ -220,6 +247,16 @@ class LoginController extends Controller
         // --- 5. REMEMBER ME SEGÚN ROL ---
         $remember = $request->boolean('remember') || $usuario->isGuardia();
         Auth::login($usuario, $remember);
+
+        // FIX V7 (Problema D): cerrar turnos huérfanos del guardia.
+        // Si el guardia tuvo una sesión que no se cerró bien (timeout, cierre
+        // del navegador, etc.), sus kioskos quedan con fecha_hora_fin=NULL.
+        // Al iniciar sesión de nuevo, los cerramos para que empiece limpio.
+        if ($usuario->esGuardia()) {
+            \App\Models\TurnoGuardia::where('id_guardia', $usuario->username)
+                ->whereNull('fecha_hora_fin')
+                ->update(['fecha_hora_fin' => now()]);
+        }
 
         // --- 6. LOG DE AUDITORÍA ---
         LogSistema::registrar('LOGIN', 'Inicio de sesion de ' . $username);
@@ -280,17 +317,44 @@ class LoginController extends Controller
 
         $usuario = UsuarioSca::where('username', $request->username)->first();
 
+        // M2 [ScaModal] — Helper para responder JSON o redirect según el tipo de request.
+        // Si la petición es AJAX (fetch con Accept: application/json), devolvemos JSON.
+        // Si es tradicional (form sin JS), devolvemos redirect con flash.
+        $responder = function($errores = null, $titulo = null, $mensaje = null) use ($request) {
+            if ($request->expectsJson()) {
+                if ($errores) {
+                    return response()->json([
+                        'success' => false,
+                        'errors'  => $errores,
+                    ], 422);
+                }
+                return response()->json([
+                    'success'  => true,
+                    'titulo'   => $titulo,
+                    'mensaje'  => $mensaje,
+                    'redirect' => route('login'),
+                ]);
+            }
+            if ($errores) {
+                return back()->withErrors($errores)->withInput();
+            }
+            return redirect()->route('login')->with(
+                'sca_modal',
+                sca_modal_flash('success', $titulo, $mensaje)
+            );
+        };
+
         // FIX I: Mensaje específico para guardias (no tienen correo institucional)
         if (!$usuario) {
-            return back()->withErrors(['username' => 'No se encontró un usuario con ese nombre de usuario.'])->withInput();
+            return $responder(['username' => 'No se encontró un usuario con ese nombre de usuario.']);
         }
-        
+
         if ($usuario->esGuardia()) {
-            return back()->withErrors(['username' => 'Los guardias deben solicitar el reseteo de contraseña directamente al administrador.'])->withInput();
+            return $responder(['username' => 'Los guardias deben solicitar el reseteo de contraseña directamente al administrador.']);
         }
 
         if (!$usuario->email_emp) {
-            return back()->withErrors(['username' => 'Su usuario no tiene correo institucional registrado. Contacte al administrador.'])->withInput();
+            return $responder(['username' => 'Su usuario no tiene correo institucional registrado. Contacte al administrador.']);
         }
 
         // Generar nueva contraseña temporal
@@ -308,12 +372,20 @@ class LoginController extends Controller
             ));
         } catch (\Exception $e) {
             LogSistema::registrar('ERROR_MAIL', "No se pudo enviar correo de reseteo a {$usuario->email_emp}: " . $e->getMessage());
-            return back()->withErrors(['username' => 'No se pudo enviar el correo. Intente más tarde o contacte al administrador.'])->withInput();
+            return $responder(['username' => 'No se pudo enviar el correo. Intente más tarde o contacte al administrador.']);
         }
 
         LogSistema::registrar('RESETEO_PASSWORD', "El usuario {$usuario->username} solicitó reseteo de contraseña.");
 
-        return redirect()->route('login')->with('success', 'Se envió una contraseña temporal a su correo institucional.');
+        // M2 [ScaModal] — Option E: Setear flash en la sesión ANTES de devolver JSON.
+        // El success se mostrará en la página de login vía flash sca_modal.
+        session()->flash('sca_modal', sca_modal_flash(
+            'success',
+            'Correo enviado',
+            'Se envió una contraseña temporal a su correo institucional.'
+        ));
+
+        return $responder(null, 'Correo enviado', 'Se envió una contraseña temporal a su correo institucional.');
     }
 
     /**
