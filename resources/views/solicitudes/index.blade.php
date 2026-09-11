@@ -4,7 +4,7 @@
 @section('title', 'Solicitudes')
 
 @section('content')
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="sca-page-head legacy-page-head">
     <div>
         @php
             // Título dinámico según la ruta
@@ -16,11 +16,12 @@
                 $titulo = 'Historial';
             }
         @endphp
-        <h1 class="h3 mb-0 fw-bold">{{ $titulo }}</h1>
-        <p class="text-muted mb-0">Consulte el historial de las solicitudes</p>
+        <div class="sca-page-eyebrow"><i class="bi bi-file-earmark-check" aria-hidden="true"></i> Solicitudes</div>
+        <h1 class="sca-page-title">{{ $titulo }}</h1>
+        <p class="sca-page-subtitle">Consulta, filtra y da seguimiento al estado de tus solicitudes.</p>
     </div>
-    <div class="d-flex gap-2">
-        <a href="javascript:history.back()" class="btn btn-outline-secondary">
+    <div class="d-flex gap-2 flex-wrap">
+        <a href="#" data-sca-history-back="1" class="btn btn-outline-secondary" aria-label="Volver a la vista anterior">
             <i class="bi bi-arrow-left"></i> Volver
         </a>
         <a href="{{ route('solicitudes.create') }}" class="btn btn-success">
@@ -39,6 +40,8 @@
                     <option value="">Todos</option>
                     <option value="pase_salida" @if(request('tipo')=='pase_salida') selected @endif>Pase de Salida</option>
                     <option value="interplantas" @if(request('tipo')=='interplantas') selected @endif>Interplantas</option>
+                    {{-- V10.3 · CAMBIO #38: filtro del nuevo tipo --}}
+                    <option value="permiso_entrada" @if(request('tipo')=='permiso_entrada') selected @endif>Permiso de Entrada</option>
                     <option value="visita" @if(request('tipo')=='visita') selected @endif>Visita</option>
                     <option value="contratista" @if(request('tipo')=='contratista') selected @endif>Contratista</option>
                 </select>
@@ -114,8 +117,9 @@
             <tbody>
                 @forelse($solicitudesInt as $s)
                 @php
-                    $tipoIcon = ['pase_salida'=>'bi-box-arrow-right','interplantas'=>'bi-arrow-left-right'][$s->tipo] ?? 'bi-question';
-                    $tipoLabel = ['pase_salida'=>'Pase de Salida','interplantas'=>'Interplantas'][$s->tipo] ?? $s->tipo;
+                    // V10.3 · CAMBIO #38: mapa con el nuevo tipo
+                    $tipoIcon = ['pase_salida'=>'bi-box-arrow-right','interplantas'=>'bi-arrow-left-right','permiso_entrada'=>'bi-door-open'][$s->tipo] ?? 'bi-question';
+                    $tipoLabel = ['pase_salida'=>'Pase de Salida','interplantas'=>'Interplantas','permiso_entrada'=>'Permiso de Entrada'][$s->tipo] ?? $s->tipo;
 
                     $esCancelada = $s->estado === 'rechazado' && str_contains($s->motivo_rechazo ?? '', 'Cancelada');
 

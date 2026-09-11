@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     {{-- M2 [ScaModal] — Token CSRF para peticiones AJAX --}}
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Cambiar Contraseña · SCA-QR</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Cambiar contraseña · Sistema de Control de Accesos mediante QR</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ asset('css/sca-ui.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -70,6 +71,15 @@
         
         /* Compactar márgenes del formulario */
         .compact-input { margin-bottom: 1rem !important; }
+        @media (max-width: 575px) {
+            .mini-header { padding: 10px 13px; }
+            .header-info { gap: 9px; font-size: .73rem; }
+            .header-info span:nth-child(2) { display:none; }
+            .main-container { padding: 12px; align-items: flex-start; }
+            .card-form { max-height: calc(100vh - 76px); border-radius: 19px; }
+            .card-form .card-body { padding-left: 18px!important; padding-right: 18px!important; }
+        }
+
     </style>
 </head>
 <body>
@@ -185,7 +195,7 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
 
     {{-- ============================================================
         M2 [ScaModal] — Cargar ScaModal en esta página standalone.

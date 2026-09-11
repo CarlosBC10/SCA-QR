@@ -63,8 +63,11 @@
             <span style="color: #333; line-height: 1.6;">
                 @php
                     $id = $solicitud instanceof \App\Models\SolicitudInt ? $solicitud->id_solicitud_int : $solicitud->id_solicitud_ext;
+                    // V10.3-fix (hallazgo usuario): permiso_entrada caía en el
+                    // else y el correo salía como "Interplantas".
                     $tipo = $solicitud instanceof \App\Models\SolicitudInt 
-                        ? ($solicitud->tipo === 'pase_salida' ? 'Pase de Salida' : 'Interplantas')
+                        ? ($solicitud->tipo === 'pase_salida' ? 'Pase de Salida'
+                            : ($solicitud->tipo === 'permiso_entrada' ? 'Permiso de Entrada' : 'Interplantas'))
                         : ($solicitud->tipo === 'visitante' ? 'Visita' : 'Contratista');
                 @endphp
                 Solicitud #{{ $id }}<br>

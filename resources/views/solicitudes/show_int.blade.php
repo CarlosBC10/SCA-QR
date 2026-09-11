@@ -22,15 +22,16 @@
     $puedeAprobar = ($puedeAprobarOrigen || $puedeAprobarDestino) && ($user->isAprobador() || $esSuperior);
 @endphp
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="sca-page-head legacy-page-head">
     <div>
-        <h1 class="h3 mb-0 fw-bold">Solicitud #{{ $solicitud->id_solicitud_int }}</h1>
-        <p class="text-muted mb-0">
+        <div class="sca-page-eyebrow"><i class="bi bi-arrow-left-right" aria-hidden="true"></i> Solicitud</div>
+        <h1 class="sca-page-title">Solicitud #{{ $solicitud->id_solicitud_int }}</h1>
+        <p class="sca-page-subtitle">
             Creada: {{ $solicitud->created_at->format('d/m/Y H:i') }}
             @if($creador) · por <strong>{{ $creador->nombre_completo }}</strong> @endif
         </p>
     </div>
-    <a href="{{ route('solicitudes.hub') }}" class="btn btn-outline-secondary">
+    <a href="#" data-sca-history-back="1" class="btn btn-outline-secondary" aria-label="Volver a la vista anterior">
         <i class="bi bi-arrow-left"></i> Volver
     </a>
 </div>
@@ -43,15 +44,49 @@
                 <h5 class="mb-0 fw-bold"><i class="bi bi-info-circle text-success"></i> Detalle</h5>
             </div>
             <div class="card-body">
+                @if($solicitud->tipo === 'pase_salida')
+                {{-- FIX 6: Tarjeta informativa de Pase de Salida (visible para todos los roles) --}}
+                <div class="alert alert-info d-flex gap-2 align-items-start mb-3" style="border-radius:10px;">
+                    <i class="bi bi-box-arrow-right fs-4 text-info mt-1"></i>
+                    <div class="small">
+                        <strong>Pase de Salida</strong>
+                        <p class="mb-1">Permiso para que un empleado se ausente de la planta durante su turno (no se traslada a otra planta).</p>
+                        <ul class="mb-0">
+                            <li>Solo aplica a empleados <strong>con turno asignado</strong>.</li>
+                            <li>La vigencia se calcula automáticamente desde el turno.</li>
+                            <li>Requiere aprobación de la planta <strong>origen</strong>.</li>
+                        </ul>
+                    </div>
+                </div>
+                @endif
+
+                {{-- V10.3 · CAMBIO #36: tarjeta informativa del nuevo tipo --}}
+                @if($solicitud->tipo === 'permiso_entrada')
+                <div class="alert alert-info d-flex gap-2 align-items-start mb-3" style="border-radius:10px;">
+                    <i class="bi bi-door-open fs-4 text-info mt-1"></i>
+                    <div class="small">
+                        <strong>Permiso de Entrada</strong>
+                        <p class="mb-1">Autoriza la <strong>entrada</strong> a la planta propia fuera de turno (más de 30 min temprano, día no laboral, turno ya vencido o sin turno asignado).</p>
+                        <ul class="mb-0">
+                            <li>Aplica únicamente a la <strong>planta del beneficiario</strong> (para otra planta se usa Interplantas).</li>
+                            <li>La vigencia la define el usuario al crear la solicitud (fecha y hora de inicio/fin).</li>
+                            <li>Requiere aprobación de la planta <strong>origen</strong>.</li>
+                            <li>Regla anti-traslape: un empleado solo puede tener <strong>un permiso interno activo</strong> a la vez.</li>
+                        </ul>
+                    </div>
+                </div>
+                @endif
                 <div class="row g-3">
                     <div class="col-md-6">
                         <label class="form-label small text-muted">Tipo</label>
                         <div class="fw-semibold">
                             @php
+                                // V10.3 · CAMBIO #36: etiqueta del nuevo tipo.
                                 $tipoLabel = match($solicitud->tipo) {
-                                    'pase_salida'  => 'Pase de Salida',
-                                    'interplantas' => 'Interplantas',
-                                    default        => $solicitud->tipo,
+                                    'pase_salida'     => 'Pase de Salida',
+                                    'interplantas'    => 'Interplantas',
+                                    'permiso_entrada' => 'Permiso de Entrada',
+                                    default           => $solicitud->tipo,
                                 };
                             @endphp
                             {{ $tipoLabel }}
@@ -338,14 +373,26 @@ document.addEventListener('DOMContentLoaded', function() {
                 headers: {
                     'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
                     'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
                 },
                 body: new FormData(form),
+                cache: 'no-store',
+                redirect: 'manual', // FIX: evita que fetch siga redirects y consuma el flash
             });
-            const data = await res.json();
-            if (data.success) {
-                // Option E: NO cerrar loading. Redirect directo.
-                window.location.replace(data.redirect);
-            } else {
+
+            const contentType = res.headers.get('content-type') || '';
+
+            // Respuesta JSON esperada
+            if (contentType.includes('application/json')) {
+                const data = await res.json();
+                if (data.success) {
+                    if (data.modal) {
+                        sessionStorage.setItem('sca_pending_modal', JSON.stringify(data.modal));
+                    }
+                    ScaModal.close();
+                    window.location.assign(data.redirect || '{{ route("solicitudes.bandeja") }}');
+                    return;
+                }
                 ScaModal.close();
                 if (data.errors) {
                     const errores = Object.values(data.errors).flat();
@@ -353,8 +400,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else {
                     ScaModal.error(data.titulo || 'Error', data.mensaje || 'No se pudo procesar.');
                 }
+                return;
             }
+
+            // Respuesta redirect (opaqueredirect o 3xx)
+            if (res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)) {
+                ScaModal.close();
+                window.location.assign('{{ route("solicitudes.bandeja") }}');
+                return;
+            }
+
+            // Respuesta no esperada
+            ScaModal.close();
+            ScaModal.error('Respuesta inesperada', 'El servidor respondió en un formato no esperado.');
         } catch(err) {
+            console.error('[SCA] Error AJAX:', err);
             ScaModal.close();
             ScaModal.error('Error de conexión', 'No se pudo contactar con el servidor.');
         }

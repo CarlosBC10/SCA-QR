@@ -1,7 +1,7 @@
 {{-- resources/views/usuarios/create.blade.php --}}
 @extends('layouts.app')
 
-@section('title', 'Nuevo Usuario')
+@section('title', 'Nuevo usuario')
 
 @section('content')
 
@@ -16,9 +16,12 @@
 </div>
 @endif
 
-<div class="mb-4">
-    <h1 class="h3 mb-0">Nuevo Usuario</h1>
+<div class="sca-page-head legacy-page-head">
+    <div>
+    <div class="sca-page-eyebrow"><i class="bi bi-person-plus" aria-hidden="true"></i> Gestión</div>
+    <h1 class="sca-page-title">Nuevo usuario</h1>
     <p class="text-muted mb-0">Seleccione el tipo de usuario a crear</p>
+    </div>
 </div>
 
 <ul class="nav nav-tabs mb-3" id="tipoTab" role="tablist">

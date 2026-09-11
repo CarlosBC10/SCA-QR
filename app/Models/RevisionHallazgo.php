@@ -52,8 +52,8 @@ class RevisionHallazgo extends Model
     // con el schema V4 y con ScannerController::resolverPendiente().
     protected $fillable = [
         'id_bitacora',
-        'resultado',            // 'todo_bien' | 'anomalia'
-        'descripcion_hallazgo', // texto libre, solo si resultado='anomalia'
+        'resultado',            // 'revision_completada' | 'hallazgo'
+        'descripcion_hallazgo', // texto libre, solo si resultado='hallazgo'
     ];
 
     // Relación 1:1 inversa con Bitacora.

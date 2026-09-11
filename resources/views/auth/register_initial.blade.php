@@ -3,9 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SCA - QR - Registro Inicial</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Registro inicial · Sistema de Control de Accesos mediante QR</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ asset('css/sca-ui.css') }}">
+    <link rel="stylesheet" href="{{ asset('css/sca-prototype.css') }}">
     <style>
         :root {
             --fruit-green: #2e7d32;
@@ -163,10 +165,11 @@
     <div class="register-container">
         <div class="register-card">
             <div class="card-header">
-                <div class="logo-container">
-                    <img src="https://ii.ct-stc.com/2/logos/empresas/2018/05/22/fruitex-de-mexico-sapi-de-cv-F1FDDE4A0A0AC3EE165829029thumbnail.png" alt="Fruitex Logo">
+                <div class="register-brand-stack" aria-label="SCA-QR y Fruitex de México">
+                    <div class="register-sca-logo"><img src="{{ asset('logo-sca-qr.svg') }}" alt="SCA-QR · Sistema de Control de Accesos"></div>
+                    <div class="register-fruitex-logo"><img src="{{ asset('logo-fruitex.png') }}" alt="Fruitex de México"></div>
                 </div>
-                <h4>Sistema de Control de Accesos - QR</h4>
+                <h4>Sistema de Control de Accesos mediante QR</h4>
                 <p>Registro del Superadmin</p>
             </div>
             <div class="card-body">

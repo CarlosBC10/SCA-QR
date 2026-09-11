@@ -9,18 +9,21 @@
 --}}
 @extends('layouts.app')
 
-@section('title', 'Editar Usuario')
+@section('title', 'Editar usuario')
 
 @section('content')
-<div class="mb-4">
-    <h1 class="h3 mb-0">Editar Usuario</h1>
-    <p class="text-muted mb-0">
+<div class="sca-page-head legacy-page-head">
+    <div>
+    <div class="sca-page-eyebrow"><i class="bi bi-person-gear" aria-hidden="true"></i> Gestión</div>
+    <h1 class="sca-page-title">Editar usuario</h1>
+    <p class="sca-page-subtitle">
         {{ $usuario->nombre_completo }} ·
         <span class="font-monospace">{{ $usuario->username }}</span>
         @if($usuario->fecha_baja)
             <span class="badge bg-secondary ms-2">Inactivo desde {{ $usuario->fecha_baja->format('d/m/Y') }}</span>
         @endif
     </p>
+    </div>
 </div>
 
 {{-- M2 [ScaModal] — Agregamos id="form-edit-usuario" para que el JS lo intercepte --}}

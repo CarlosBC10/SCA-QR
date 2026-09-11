@@ -11,6 +11,19 @@ class PasswordController extends Controller
     public function edit()
     {
         $user = auth()->user();
+
+        if (!$user) {
+            return redirect()->route('login');
+        }
+
+        // FIX #9: si el usuario fue dado de baja, cerrar sesión inmediatamente.
+        if ($user->fecha_baja !== null) {
+            auth()->logout();
+            request()->session()->invalidate();
+            request()->session()->regenerateToken();
+            return redirect()->route('login');
+        }
+
         if (!str_starts_with($user->password, 'temp:')) {
             return redirect()->route('home');
         }
@@ -34,6 +47,18 @@ class PasswordController extends Controller
         ]);
 
         $user = $request->user();
+
+        // FIX #9: si el usuario fue dado de baja, no permitir cambiar contraseña
+        // (evita usar el cambio de contraseña como puerta trasera para reactivar).
+        if (!$user || $user->fecha_baja !== null) {
+            auth()->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+            return response()->json([
+                'success' => false,
+                'message' => 'La cuenta ya no está activa.'
+            ], 403);
+        }
 
         // Validar contraseña actual (quitando el prefijo 'temp:')
         $hashReal = substr($user->password, 5);

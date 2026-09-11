@@ -11,7 +11,7 @@
 --}}
 @extends('layouts.app')
 
-@section('title', 'Iniciar Sesión')
+@section('title', 'Acceso · Sistema de Control de Accesos mediante QR')
 
 @section('content')
 <style>
@@ -287,17 +287,13 @@
 
         <div class="login-scanline"></div>
         <div class="login-brand-inner">
-            @if(file_exists(public_path('logo-fruitex.png')))
-                <img src="{{ asset('logo-fruitex.png') }}" alt="Fruitex de México" class="login-logo-img">
-            @elseif(file_exists(public_path('logo.png')))
-                <img src="{{ asset('logo.png') }}" alt="Fruitex de México" class="login-logo-img">
-            @else
-                <div class="login-logo-fallback">SCA</div>
-            @endif
+            <div class="login-brand-stack" aria-label="SCA-QR y Fruitex de México">
+                <div class="login-brand-logo-sca">
+                    <img src="{{ asset('logos/scaqr_logo.png') }}" alt="SCA-QR · Sistema de Control de Accesos">
+                </div>
+            </div>
 
-            <div class="login-eyebrow">Fruitex de México</div>
-            <h1 class="login-title">SCA-QR</h1>
-            <p class="login-subtitle">Sistema de Control de Accesos</p>
+            <p class="login-subtitle">Sistema de Control de Accesos mediante QR</p>
 
             <ul class="login-features">
                 <li><i class="bi bi-check-circle-fill"></i> Registro de entradas y salidas en tiempo real</li>

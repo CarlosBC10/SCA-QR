@@ -45,6 +45,8 @@ class CredencialExternoMail extends Mailable
     public function attachments(): array
     {
         $attachments = [];
+        // FIX 8: Cargar relaciones antes de generar credenciales
+        $this->solicitud->loadMissing(['plantaDestino', 'anfitrion.puesto', 'externos.externo']);
 
         // 1. Adjuntar PNGs individuales
         foreach ($this->solicitud->externos as $detalle) {

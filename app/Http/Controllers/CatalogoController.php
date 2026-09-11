@@ -25,8 +25,12 @@ class CatalogoController extends Controller
      */
     public function justificaciones()
     {
-        $justificaciones = JustificacioneHorario::orderBy('nombre')
-            ->get(['id_justificacion', 'nombre', 'descripcion']);
+        // FIX catálogo: devolver también la categoría para que el dropdown
+        // del guardia pueda agrupar con <optgroup> y sea más fácil de buscar.
+        // Ordenar por categoría primero, luego por nombre.
+        $justificaciones = JustificacioneHorario::orderBy('categoria')
+            ->orderBy('nombre')
+            ->get(['id_justificacion', 'nombre', 'descripcion', 'categoria']);
 
         return response()->json($justificaciones);
     }

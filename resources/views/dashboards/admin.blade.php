@@ -1,28 +1,25 @@
 {{-- resources/views/dashboards/admin.blade.php --}}
 {{--
-    Panel de Admin.
-    Muestra bandeja de aprobaciones + gestión de usuarios + historial.
-
-    CAMBIOS V4:
-      - Eliminada la referencia a \App\Models\Solicitud (modelo eliminado).
-      - Ahora se cuentan pendientes en SolicitudInt + SolicitudExt por separado.
+    Dashboard de Admin.
+    PRESENTACIÓN V3: el dashboard responde primero a la pregunta "¿qué requiere mi atención?".
+    Lógica de conteo y permisos intacta.
 --}}
 @extends('layouts.app')
 
-@section('title', 'Panel Admin')
+@section('title', 'Administración')
 
 @section('content')
-<div class="mb-4">
-    <h3 class="fw-bold mb-0">Panel de Administrador</h3>
-    <p class="text-muted mb-0">Bienvenido, {{ Auth::user()->nombre_completo }}.</p>
+<div class="sca-page-head sca-dashboard-head">
+    <div>
+        <div class="sca-page-eyebrow"><i class="bi bi-speedometer2" aria-hidden="true"></i> Administración</div>
+        <h1 class="sca-page-title">Resumen de accesos</h1>
+        <p class="sca-page-subtitle">Supervisa lo que requiere atención y consulta quién se encuentra dentro de las plantas.</p>
+    </div>
 </div>
 
 @php
     // V4: Solicitud eliminado; contar pendientes en solicitudes_int + solicitudes_ext
-    //
-    // FIX 3-g (Admin): ahora contamos también las solicitudes en 'aprobado_parcial'
-    // que siguen esperando revisión de algún aprobador (origen o destino).
-    // El Admin ve TODAS las plantas, así que no hay scoping.
+    // FIX 3-g (Admin): se incluyen también solicitudes en aprobado_parcial que siguen esperando revisión.
     $pendientesInt = \App\Models\SolicitudInt::where(function($q) {
         $q->whereIn('estado', ['pendiente_origen', 'pendiente_destino'])
           ->orWhere(function($q2) {
@@ -33,73 +30,32 @@
                  });
           });
     })->count();
-    // Externas: pendiente (una sola aprobación)
     $pendientesExt = \App\Models\SolicitudExt::where('estado', 'pendiente')->count();
     $pendientesCount = $pendientesInt + $pendientesExt;
 @endphp
 
-<div class="row g-4 mb-4">
-    {{-- Bandeja de aprobaciones --}}
-    <div class="col-xl-4 col-md-6">
-        <a href="{{ route('solicitudes.bandeja') }}" class="text-decoration-none">
-            <div class="card border-0 shadow-sm h-100 sca-card card-hover" style="border-radius: 16px; border-left: 4px solid #f57c00 !important;">
-                <div class="card-body d-flex align-items-center">
-                    <div class="rounded-3 p-3 me-3" style="background: rgba(245,124,0,0.15);">
-                        <i class="bi bi-inbox-fill fs-2" style="color: #f57c00;"></i>
-                    </div>
-                    <div>
-                        <h5 class="mb-0 fw-bold text-dark">Bandeja de Aprobaciones</h5>
-                        <p class="text-muted small mb-0">
-                            @if($pendientesCount > 0)
-                                <span class="badge bg-danger">{{ $pendientesCount }} pendientes</span>
-                            @else
-                                <span class="badge bg-success">Al día</span>
-                            @endif
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </a>
+<div class="sca-focus-card mb-4 {{ $pendientesCount > 0 ? 'has-alert' : 'is-clear' }}">
+    <div class="sca-focus-icon"><i class="bi {{ $pendientesCount > 0 ? 'bi-inbox-fill' : 'bi-check2-circle' }}" aria-hidden="true"></i></div>
+    <div class="sca-focus-copy">
+        <span class="sca-kicker">Atención requerida</span>
+        <strong>{{ $pendientesCount }}</strong>
+        <p>{{ $pendientesCount > 0 ? 'solicitudes requieren revisión.' : 'No hay solicitudes pendientes en este momento.' }}</p>
     </div>
+    <a href="{{ route('solicitudes.bandeja') }}" class="btn {{ $pendientesCount > 0 ? 'btn-warning' : 'btn-outline-success' }} ms-auto">
+        <i class="bi bi-arrow-right-circle me-1" aria-hidden="true"></i>
+        {{ $pendientesCount > 0 ? 'Revisar bandeja' : 'Abrir bandeja' }}
+    </a>
+</div>
 
-    {{-- Gestión de usuarios --}}
-    <div class="col-xl-4 col-md-6">
-        <a href="{{ route('usuarios.index') }}" class="text-decoration-none">
-            <div class="card border-0 shadow-sm h-100 sca-card card-hover" style="border-radius: 16px; border-left: 4px solid #2e7d32 !important;">
-                <div class="card-body d-flex align-items-center">
-                    <div class="rounded-3 p-3 me-3" style="background: rgba(46,125,50,0.15);">
-                        <i class="bi bi-people-fill fs-2 text-success"></i>
-                    </div>
-                    <div>
-                        <h5 class="mb-0 fw-bold text-dark">Gestionar Usuarios</h5>
-                        <p class="text-muted small mb-0">Cuentas, roles y guardias</p>
-                    </div>
-                </div>
-            </div>
-        </a>
-    </div>
-
-    {{-- Historial general (solo Admin/Super) --}}
-    <div class="col-xl-4 col-md-6">
-        <a href="{{ route('solicitudes.historial') }}" class="text-decoration-none">
-            <div class="card border-0 shadow-sm h-100 sca-card card-hover" style="border-radius: 16px; border-left: 4px solid #17a2b8 !important;">
-                <div class="card-body d-flex align-items-center">
-                    <div class="rounded-3 p-3 me-3" style="background: rgba(23,162,184,0.15);">
-                        <i class="bi bi-clock-history fs-2" style="color: #17a2b8;"></i>
-                    </div>
-                    <div>
-                        <h5 class="mb-0 fw-bold text-dark">Historial General</h5>
-                        <p class="text-muted small mb-0">Todas las solicitudes</p>
-                    </div>
-                </div>
-            </div>
-        </a>
+<div class="sca-section-heading">
+    <div>
+        <span class="sca-kicker">En este momento</span>
+        <h2>Personas dentro de las plantas</h2>
     </div>
 </div>
 
-{{-- Personas dentro (widget reutilizable) --}}
-<div class="row g-4">
-    <div class="col-lg-8">
+<div class="row">
+    <div class="col-12">
         @include('partials._personas_dentro', ['id' => 'admin', 'plantas' => \App\Models\Planta::where('activa', true)->orderBy('nombre')->get()])
     </div>
 </div>

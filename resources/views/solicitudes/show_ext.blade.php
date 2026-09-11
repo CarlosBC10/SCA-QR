@@ -16,15 +16,16 @@
     }
 @endphp
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="sca-page-head legacy-page-head">
     <div>
-        <h1 class="h3 mb-0 fw-bold">Solicitud #{{ $solicitud->id_solicitud_ext }}</h1>
-        <p class="text-muted mb-0">
+        <div class="sca-page-eyebrow"><i class="bi bi-person-badge" aria-hidden="true"></i> Solicitud externa</div>
+        <h1 class="sca-page-title">Solicitud #{{ $solicitud->id_solicitud_ext }}</h1>
+        <p class="sca-page-subtitle">
             Creada: {{ $solicitud->created_at->format('d/m/Y H:i') }}
             @if($creador) · por <strong>{{ $creador->nombre_completo }}</strong> @endif
         </p>
     </div>
-    <a href="{{ route('solicitudes.hub') }}" class="btn btn-outline-secondary">
+    <a href="#" data-sca-history-back="1" class="btn btn-outline-secondary" aria-label="Volver a la vista anterior">
         <i class="bi bi-arrow-left"></i> Volver
     </a>
 </div>

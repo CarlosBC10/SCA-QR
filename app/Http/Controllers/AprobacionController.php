@@ -93,6 +93,15 @@ class AprobacionController extends Controller
             return back()->withErrors(['error' => 'Esta solicitud es grupal. Use la revisión grupal.']);
         }
 
+        // FIX #6: no aprobar solicitudes ya vencidas.
+        $solicitud->expirarSiVencido();
+        $solicitud->refresh();
+        if ($solicitud->estado === 'expirado') {
+            return back()->withErrors([
+                'error' => 'La solicitud ya expiró y no puede ser aprobada.'
+            ]);
+        }
+
         DB::beginTransaction();
         try {
             $userId = (int) $user->username;
@@ -107,8 +116,10 @@ class AprobacionController extends Controller
                 $solicitud->fecha_aprobacion_origen = $ahora;
                 $pasoAprobado = 'origen';
 
-                if ($solicitud->tipo === 'pase_salida') {
-                    // Pase de salida: solo necesita origen
+                // V10.3 · CAMBIO #37: permiso_entrada, igual que pase_salida,
+                // solo necesita aprobación de origen (una planta interviene).
+                if (in_array($solicitud->tipo, ['pase_salida', 'permiso_entrada'])) {
+                    // Pase de salida / Permiso de entrada: solo necesita origen
                     $solicitud->estado = 'aprobado';
                 } elseif ($esSuperior) {
                     // Admin/Super aprueba también destino en interplantas
@@ -142,6 +153,19 @@ class AprobacionController extends Controller
             // Para individual, no hay rechazados
             $this->enviarCorreoAprobacionInt($solicitud, $pasoAprobado, null, 0, [], []);
 
+            // ============================================================
+            // V10.3.5-fix: si un Admin/Superadmin aprobó DIRECTAMENTE una
+            // solicitud pendiente (en un solo paso, sin esperar el flujo
+            // local de 1-2 partes), se informa por correo a los aprobadores
+            // de las plantas involucradas + Admin/Super (sin el aprobador
+            // ni el creador: ambos ya fueron notificados por su lado).
+            // Un aprobador local que aprueba el flujo normal NO dispara
+            // este correo (es el flujo esperado, no una intervención).
+            // ============================================================
+            if ($esSuperior && $solicitud->estado === 'aprobado') {
+                $this->enviarCorreoAprobacionDirecta($solicitud, $user);
+            }
+
             LogSistema::registrar('APROBAR_SOLICITUD', "Solicitud INT #{$solicitud->id_solicitud_int} aprobada (paso: {$pasoAprobado}) por {$user->username}");
 
             // Notificaciones in-app (defensivo)
@@ -156,7 +180,12 @@ class AprobacionController extends Controller
             }
 
             // M2 [ScaModal] — Construir mensaje detallado según el paso aprobado.
-            $tipoLabel = $solicitud->tipo === 'pase_salida' ? 'Pase de salida' : 'Interplantas';
+            // V10.3 · CAMBIO #37: etiqueta correcta para permiso_entrada.
+            $tipoLabel = match($solicitud->tipo) {
+                'pase_salida'     => 'Pase de salida',
+                'permiso_entrada' => 'Permiso de entrada',
+                default           => 'Interplantas',
+            };
             $estadoLabel = $solicitud->estado === 'aprobado' ? 'Aprobada' : 'Pendiente de destino';
             $pasoLabel = match($pasoAprobado) {
                 'origen'   => 'Origen',
@@ -183,13 +212,15 @@ class AprobacionController extends Controller
             }
             $mensaje .= "</div>";
 
-            // Option E: Setear flash en sesión.
-            session()->flash('sca_modal', sca_modal_flash('success', 'Solicitud aprobada', $mensaje));
-
             if ($request->expectsJson()) {
                 return response()->json([
                     'success'  => true,
                     'redirect' => route('solicitudes.bandeja'),
+                    'modal'    => [
+                        'tipo'   => 'success',
+                        'titulo' => 'Solicitud aprobada',
+                        'mensaje' => $mensaje,
+                    ],
                 ]);
             }
 
@@ -261,9 +292,6 @@ class AprobacionController extends Controller
         $mensaje .= "<div class='p-2 bg-light rounded'><em>" . nl2br(e($request->motivo_rechazo)) . "</em></div>";
         $mensaje .= "</div>";
 
-        // Option E: Setear flash en sesión.
-        session()->flash('sca_modal', sca_modal_flash('success', 'Solicitud rechazada', $mensaje));
-
         if ($request->expectsJson()) {
             return response()->json([
                 'success'  => true,
@@ -307,11 +335,43 @@ class AprobacionController extends Controller
             return back()->withErrors(['error' => 'Esta función solo aplica para solicitudes grupales.']);
         }
 
+        // FIX #6: no aprobar solicitudes ya vencidas.
+        $solicitud->expirarSiVencido();
+        $solicitud->refresh();
+        if ($solicitud->estado === 'expirado') {
+            return back()->withErrors([
+                'error' => 'La solicitud ya expiró y no puede ser aprobada.'
+            ]);
+        }
+
         // CAMBIO V7: recibir el motivo general del modal JS
         $estados = $request->input('estados', []);
         $motivoRechazo = $request->input('motivo_rechazo_general');
         $userId = (int) $user->username;
         $ahora = now();
+
+        // FIX #4.4: validar que se recibió decisión para TODOS los empleados.
+        $empleadosEsperados = $solicitud->empleados
+            ->pluck('empleado_id')
+            ->map(fn ($id) => (string) $id)
+            ->sort()
+            ->values();
+        $empleadosRecibidos = collect(array_keys($estados))
+            ->map(fn ($id) => (string) $id)
+            ->sort()
+            ->values();
+        if ($empleadosEsperados->all() !== $empleadosRecibidos->all()) {
+            return back()->withErrors([
+                'error' => 'La revisión grupal está incompleta. Debe indicar una decisión para cada empleado.'
+            ]);
+        }
+        foreach ($estados as $empleadoId => $decision) {
+            if (!in_array($decision, ['aprobado', 'rechazado'], true)) {
+                return back()->withErrors([
+                    'error' => 'Se recibió una decisión de aprobación no válida.'
+                ]);
+            }
+        }
 
         DB::beginTransaction();
         try {
@@ -362,7 +422,9 @@ class AprobacionController extends Controller
                     $solicitud->aprobador_origen_empleado_id = $userId;
                     $solicitud->fecha_aprobacion_origen = $ahora;
 
-                    if ($solicitud->tipo === 'pase_salida') {
+                    // V10.3 · CAMBIO #37: idem en flujo grupal — permiso_entrada
+                    // completa la aprobación en origen (no hay paso destino).
+                    if (in_array($solicitud->tipo, ['pase_salida', 'permiso_entrada'])) {
                         $solicitud->estado = 'aprobado';
                         $pasoAprobado = 'completo';
                     } elseif ($esSuperior) {
@@ -427,6 +489,13 @@ class AprobacionController extends Controller
             $solicitud->save();
             DB::commit();
 
+            // FIX bug modal "rechazados": recargar la relación empleados desde BD
+            // después del commit. Los UPDATE directos (línea 384) no actualizan
+            // la colección en memoria de Eloquent, así que el foreach de abajo
+            // leería estados stale (ej: 'pendiente') y clasificaría todo como
+            // rechazado. load() fuerza la recarga aunque ya estuviera cargada.
+            $solicitud->load('empleados.empleado');
+
             // ============================================================
             // CAMBIO V7: Enviar correo al creador con listas de aprobados/rechazados
             // ============================================================
@@ -451,6 +520,16 @@ class AprobacionController extends Controller
                 $nombresAprobados,
                 $nombresRechazados
             );
+
+            // ============================================================
+            // V10.3.5-fix: idem flujo individual — si un Admin/Superadmin
+            // resolvió completamente la revisión grupal (estado aprobado),
+            // se informa a los aprobadores de las plantas involucradas +
+            // Admin/Super. El aprobador local en flujo normal no dispara.
+            // ============================================================
+            if ($esSuperior && $solicitud->estado === 'aprobado') {
+                $this->enviarCorreoAprobacionDirecta($solicitud, $user);
+            }
 
             LogSistema::registrar(
                 'APROBAR_SOLICITUD_GRUPAL',
@@ -513,13 +592,16 @@ class AprobacionController extends Controller
                 ];
             }
 
-            // Option E: Setear flash en sesión (con detalles si los hay).
-            session()->flash('sca_modal', sca_modal_flash('success', 'Solicitud revisada', $mensaje, $detalles ?: null));
-
             if ($request->expectsJson()) {
                 return response()->json([
                     'success'  => true,
                     'redirect' => route('solicitudes.bandeja'),
+                    'modal'    => [
+                        'tipo'     => 'success',
+                        'titulo'   => 'Solicitud revisada',
+                        'mensaje'  => $mensaje,
+                        'detalles' => $detalles ?: null,
+                    ],
                 ]);
             }
 
@@ -557,6 +639,15 @@ class AprobacionController extends Controller
             return back()->withErrors(['error' => 'No tiene permisos para aprobar esta solicitud o ya fue procesada.']);
         }
 
+        // FIX #6: no aprobar solicitudes ya vencidas.
+        $solicitud->expirarSiVencido();
+        $solicitud->refresh();
+        if ($solicitud->estado === 'expirado') {
+            return back()->withErrors([
+                'error' => 'La solicitud ya expiró y no puede ser aprobada.'
+            ]);
+        }
+
         DB::beginTransaction();
         try {
             $userId = (int) $user->username;
@@ -569,13 +660,37 @@ class AprobacionController extends Controller
             $solicitud->aprobador_destino_empleado_id = $userId;
             $solicitud->fecha_aprobacion_destino = $ahora;
 
+            // FIX #4.3 (fail-open): validar que se recibió decisión para TODOS los externos.
+            // Esta validación va ANTES del foreach, no dentro (bug anterior).
+            $idsEsperados = $solicitud->externos
+                ->pluck('id_solicitud_externo_detalle')
+                ->map(fn ($id) => (string) $id)
+                ->sort()
+                ->values();
+            $idsRecibidos = collect(array_keys($estados))
+                ->map(fn ($id) => (string) $id)
+                ->sort()
+                ->values();
+            if ($idsEsperados->all() !== $idsRecibidos->all()) {
+                return back()->withErrors([
+                    'error' => 'La revisión de la solicitud está incompleta. Debe indicar una decisión para cada persona.'
+                ]);
+            }
+            foreach ($estados as $detalleId => $decision) {
+                if (!in_array($decision, ['autorizado', 'cancelado'], true)) {
+                    return back()->withErrors([
+                        'error' => 'Se recibió una decisión de aprobación no válida.'
+                    ]);
+                }
+            }
+
             // Procesar cada externo
             $aproboTodos = true;
             $externosCancelados = 0;
             $prefijoQr = config('sca_qr.prefijo_qr_externo');
 
             foreach ($solicitud->externos as $detalle) {
-                $decision = $estados[$detalle->id_solicitud_externo_detalle] ?? 'autorizado';
+                $decision = $estados[$detalle->id_solicitud_externo_detalle];
 
                 if ($decision === 'autorizado') {
                     // Generar QR si no lo tiene
@@ -706,13 +821,15 @@ class AprobacionController extends Controller
                 ];
             }
 
-            // Option E: Setear flash en sesión.
-            session()->flash('sca_modal', sca_modal_flash('success', 'Solicitud aprobada', $mensaje, $detalles ?: null));
-
             if ($request->expectsJson()) {
                 return response()->json([
                     'success'  => true,
                     'redirect' => route('solicitudes.bandeja'),
+                    'modal'    => [
+                        'tipo'   => 'success',
+                        'titulo' => 'Solicitud aprobada',
+                        'mensaje' => $mensaje,
+                    ],
                 ]);
             }
 
@@ -791,12 +908,15 @@ class AprobacionController extends Controller
         $mensaje .= "</div>";
 
         // Option E: Setear flash en sesión.
-        session()->flash('sca_modal', sca_modal_flash('success', 'Solicitud rechazada', $mensaje));
-
         if ($request->expectsJson()) {
             return response()->json([
-                'success'  => true,
+                'success' => true,
                 'redirect' => route('solicitudes.bandeja'),
+                'modal'    => [
+                    'tipo'   => 'success',
+                    'titulo' => 'Solicitud rechazada',
+                    'mensaje' => $mensaje,
+                ],
             ]);
         }
 
@@ -889,7 +1009,7 @@ class AprobacionController extends Controller
                     $usuarioCreador->nombre_completo,
                     'Solicitud aprobada - #' . $solicitud->id_solicitud_int,
                     '✅ Solicitud Aprobada',
-                    'Tu solicitud de ' . ($solicitud->tipo === 'pase_salida' ? 'Pase de Salida' : 'Interplantas') . ' ha sido aprobada completamente.',
+                    'Tu solicitud de ' . (in_array($solicitud->tipo, ['pase_salida', 'permiso_entrada']) ? ($solicitud->tipo === 'permiso_entrada' ? 'Permiso de Entrada' : 'Pase de Salida') : 'Interplantas') . ' ha sido aprobada completamente.',
                     null,
                     $nombresAprobados, // aprobados
                     null, // rechazados
@@ -926,6 +1046,43 @@ class AprobacionController extends Controller
             }
         } catch (\Exception $e) {
             LogSistema::registrar('ERROR_NOTIF', 'Error al enviar correo de aprobación INT: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * V10.3.5-fix: correo informativo cuando un Admin/Superadmin aprueba
+     * directamente (un solo paso) una solicitud que estaba pendiente.
+     * Destinatarios: aprobadores de las plantas involucradas + Admin/Super,
+     * sin el aprobador ni el creador (NotificacionService calcula el
+     * alcance; nunca aprobadores de plantas ajenas a la solicitud).
+     */
+    private function enviarCorreoAprobacionDirecta($solicitud, $aprobador)
+    {
+        try {
+            $destinatarios = NotificacionService::destinatariosCorreoAprobacionDirecta($solicitud, $aprobador);
+
+            $id = $solicitud instanceof \App\Models\SolicitudInt
+                ? $solicitud->id_solicitud_int
+                : $solicitud->id_solicitud_ext;
+
+            foreach ($destinatarios as $dest) {
+                if ($dest->email_emp) {
+                    \Mail::to($dest->email_emp)->send(new \App\Mail\NotificacionSolicitudMail(
+                        $solicitud,
+                        $dest->nombre_completo,
+                        'Solicitud aprobada directamente - #' . $id,
+                        '✅ Solicitud Aprobada Directamente',
+                        "{$aprobador->nombre_completo} aprobó completamente la Solicitud #{$id} sin requerir el flujo local de aprobación.",
+                        null,
+                        null, // aprobados
+                        null, // rechazados
+                        null, // personas
+                        $aprobador->nombre_completo
+                    ));
+                }
+            }
+        } catch (\Exception $e) {
+            LogSistema::registrar('ERROR_NOTIF', 'Error al notificar aprobación directa: ' . $e->getMessage());
         }
     }
 

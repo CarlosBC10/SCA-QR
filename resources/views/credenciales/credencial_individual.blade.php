@@ -532,9 +532,9 @@
                     <span class="label">PLANTA:</span>
                     {{ $solicitud->plantaDestino?->nombre ?? 'N/A' }}
                 </div>
-                    <div class="fila">
+                <div class="fila">
                     <span class="label">Anfitrión:</span>
-                    {{ $solicitud->anfitrion?->nombre ?? 'N/A' }}
+                    {{ $solicitud->anfitrion?->nombre_completo ?? 'N/A' }}
                 </div>
 
             </div>

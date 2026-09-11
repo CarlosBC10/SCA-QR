@@ -9,10 +9,11 @@
 @section('title', 'Gestión de Empleados')
 
 @section('content')
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="sca-page-head legacy-page-head">
     <div>
-        <h1 class="h3 mb-0">Gestión de Empleados</h1>
-        <p class="text-muted mb-0">Verifique la clasificación y turno de los empleados</p>
+        <div class="sca-page-eyebrow"><i class="bi bi-person-vcard" aria-hidden="true"></i> Gestión</div>
+        <h1 class="sca-page-title">Empleados</h1>
+        <p class="sca-page-subtitle">Verifica clasificación, planta y turno de los empleados sincronizados.</p>
     </div>
 </div>
 

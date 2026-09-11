@@ -167,7 +167,17 @@ class LoginController extends Controller
         $usuario = UsuarioSca::where('username', $username)->first();
         $loginValido = false;
 
+        // FIX #8: validar que el usuario esté activo ANTES de aceptar contraseña temporal.
+        // Antes: Auth::login($usuario, false) se ejecutaba antes de validar fecha_baja,
+        // permitiendo login con contraseña temporal de un usuario ya dado de baja.
         if ($usuario) {
+            if ($usuario->fecha_alta === null || $usuario->fecha_baja !== null) {
+                RateLimiter::hit($throttleKey, 60);
+                throw ValidationException::withMessages([
+                    'username' => 'Su usuario está inactivo. Contacte al administrador.',
+                ]);
+            }
+
             // Si el password tiene el prefijo 'temp:'
             if (str_starts_with($usuario->password, 'temp:')) {
                 // Extraer el hash real (quitar 'temp:')

@@ -10,12 +10,15 @@
 @section('title', 'Configurar Empleado')
 
 @section('content')
-<div class="mb-4">
-    <h1 class="h3 mb-0">Configurar Empleado</h1>
-    <p class="text-muted mb-0">
+<div class="sca-page-head legacy-page-head">
+    <div>
+    <div class="sca-page-eyebrow"><i class="bi bi-person-gear" aria-hidden="true"></i> Gestión</div>
+    <h1 class="sca-page-title">Configurar empleado</h1>
+    <p class="sca-page-subtitle">
         ID: <span class="font-monospace">{{ $empleado->id_empleado }}</span> ·
         {{ $empleado->nombre_completo }}
     </p>
+    </div>
 </div>
 
 <div class="card border-0 shadow-sm mb-3">
@@ -198,7 +201,7 @@
             const resetManual = form.querySelector('input[name="resetear_manual"]')?.checked;
 
             // Tomar el nombre del empleado del H1 de la página
-            const nombreEmpleado = document.querySelector('p.text-muted')?.textContent.trim() || 'este empleado';
+            const nombreEmpleado = {{ \Illuminate\Support\Js::from($empleado->nombre_completo) }};
 
             // Construir mensaje del confirm
             let mensaje = `<div class="text-start">`;

@@ -1,12 +1,15 @@
 {{-- resources/views/puestos/index.blade.php --}}
 @extends('layouts.app')
 
-@section('title', 'Clasificar Puestos')
+@section('title', 'Clasificación de puestos')
 
 @section('content')
-<div class="mb-4">
-    <h1 class="h3 mb-0 fw-bold">Clasificación de Puestos</h1>
-    <p class="text-muted mb-0">Asigne el tipo de empleado a cada puesto. Al clasificar, se actualizan todos los empleados con ese puesto.</p>
+<div class="sca-page-head legacy-page-head">
+    <div>
+    <div class="sca-page-eyebrow"><i class="bi bi-diagram-2" aria-hidden="true"></i> Configuración</div>
+    <h1 class="sca-page-title">Clasificación de puestos</h1>
+    <p class="sca-page-subtitle">Asigna el tipo de empleado a cada puesto. Los cambios se reflejan en los empleados relacionados.</p>
+    </div>
 </div>
 
 @php

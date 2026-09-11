@@ -4,13 +4,14 @@
 @section('title', 'Bandeja de Aprobaciones')
 
 @section('content')
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="sca-page-head legacy-page-head">
     <div>
-        <h1 class="h3 mb-0 fw-bold">Bandeja de Aprobaciones</h1>
-        <p class="text-muted mb-0">Solicitudes pendientes de su autorización</p>
+        <div class="sca-page-eyebrow"><i class="bi bi-inbox" aria-hidden="true"></i> Operación</div>
+        <h1 class="sca-page-title">Bandeja de aprobaciones</h1>
+        <p class="sca-page-subtitle">Revisa las solicitudes pendientes que requieren tu autorización.</p>
     </div>
-    <a href="javascript:history.back()" class="btn btn-outline-secondary">
-        <i class="bi bi-arrow-left"></i> Volver
+    <a href="#" data-sca-history-back="1" class="btn btn-outline-secondary" aria-label="Volver a la vista anterior">
+        <i class="bi bi-arrow-left me-1"></i> Volver
     </a>
 </div>
 
@@ -34,6 +35,8 @@
                     <option value="">Todas</option>
                     <option value="pase_salida" @if(request('tipo')=='pase_salida') selected @endif>Pase de Salida</option>
                     <option value="interplantas" @if(request('tipo')=='interplantas') selected @endif>Interplantas</option>
+                    {{-- V10.3 · CAMBIO #38: filtro del nuevo tipo en bandeja --}}
+                    <option value="permiso_entrada" @if(request('tipo')=='permiso_entrada') selected @endif>Permiso de Entrada</option>
                     <option value="visita" @if(request('tipo')=='visita') selected @endif>Visita</option>
                     <option value="contratista" @if(request('tipo')=='contratista') selected @endif>Contratista</option>
                 </select>

@@ -75,16 +75,17 @@ class ExpirarSolicitudes extends Command
             // FIX V7 (Problema C): NO invalidar QRs de externos que estén dentro
             // de planta (podrán escanear para salir).
             foreach ($sol->externos as $detalle) {
-                // ¿El externo está dentro de planta (última bitácora = entrada autorizada)?
+                // ────────────────────────────────────────────────────────
+                // V10.3 · CAMBIO #11 (bugfix): $personaId NO existía en este
+                // ámbito (variable nunca definida en el foreach). PHP lanza
+                // "Undefined variable $personaId" (Warning/ErrorException
+                // según config) y el comando programado abortaba en cuanto
+                // expiraba una solicitud externa — los QR nunca llegaban a
+                // invalidarse persistente. Se construye el persona_id con el
+                // mismo prefijo "E-" que usa la bitácora para externos.
+                // ────────────────────────────────────────────────────────
                 $personaId = 'E-' . $detalle->id_externos;
-                $ultimaBitacora = Bitacora::where('persona_id', $personaId)
-                    ->whereNotIn('estado_evento', ['denegado'])
-                    ->latest('fecha_hora')
-                    ->first();
-
-                $estaDentro = $ultimaBitacora
-                    && $ultimaBitacora->tipo_evento === 'entrada'
-                    && $ultimaBitacora->estado_evento === 'autorizado';
+                $estaDentro = \App\Services\PresenciaService::estaDentro($personaId);
 
                 // Solo invalidar QRs 'autorizado' (no los 'pendiente' o 'cancelado')
                 // y solo si el externo NO está dentro de planta.

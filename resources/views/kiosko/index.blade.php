@@ -89,14 +89,26 @@
     .mode-badge { display: inline-flex; align-items: center; gap: 0.55rem; padding: 0.45rem 1.3rem 0.45rem 0.5rem; border-radius: 50px; font-size: clamp(0.8rem, 1.8vw, 1rem); font-weight: 700; margin-bottom: 1.3rem; background: var(--k-glass); color: #fff; border: 1px solid var(--k-glass-border); }
     .mode-badge i { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: rgba(255,255,255,0.2); font-size: 0.85em; flex-shrink: 0; }
 
-    .camera-floating { position: fixed; bottom: 18px; right: 18px; width: 210px; z-index: 9998; border-radius: 16px; overflow: hidden; box-shadow: 0 14px 34px rgba(0,0,0,0.5); display: none; border: 1px solid rgba(255,255,255,0.25); background: #000; }
+    /* V10.3.8-fix: ventana de cámara más grande para apuntar mejor el QR
+       (antes 210px: el QR lejano no se distinguía en la previsualización) */
+    .camera-floating { position: fixed; bottom: 18px; right: 18px; width: 300px; z-index: 9998; border-radius: 16px; overflow: hidden; box-shadow: 0 14px 34px rgba(0,0,0,0.5); display: none; border: 1px solid rgba(255,255,255,0.25); background: #000; }
     .camera-floating-header { display: flex; align-items: center; gap: 0.4rem; padding: 6px 10px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.68rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
     .camera-rec-dot { width: 7px; height: 7px; border-radius: 50%; background: #ff5252; animation: recBlink 1.2s ease-in-out infinite; }
     @keyframes recBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
-    .camera-floating video { width: 100%; height: 150px; object-fit: cover; display: block; background: #000; }
+    .camera-floating video { width: 100%; height: 200px; object-fit: cover; display: block; background: #000; }
     .camera-scan-line { position: absolute; top: 30px; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, #fff, transparent); animation: scanLine 2s linear infinite; }
-    @keyframes scanLine { 0% { top: 30px; } 50% { top: 174px; } 100% { top: 30px; } }
+    @keyframes scanLine { 0% { top: 30px; } 50% { top: 220px; } 100% { top: 30px; } }
     .camera-close { position: absolute; top: 5px; right: 6px; background: rgba(255,255,255,0.15); color: #fff; border: none; border-radius: 50%; width: 22px; height: 22px; font-size: 0.8rem; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+
+    /* V10.3.8-fix: barra de controles — elegir webcam externa/integrada,
+       ver la resolución real de captura y acercar el QR con zoom */
+    .camera-controls { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.72); padding: 6px 8px; display: flex; flex-direction: column; gap: 5px; }
+    .camera-controls-row { display: flex; align-items: center; gap: 6px; }
+    .camera-controls select { flex: 1 1 auto; min-width: 0; font-size: 0.72rem; padding: 2px 4px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); background: rgba(255,255,255,0.12); color: #fff; outline: none; }
+    .camera-controls select option { color: #333; background: #fff; }
+    .camera-res { font-size: 0.65rem; color: #8fe3b4; white-space: nowrap; }
+    .camera-controls input[type="range"] { flex: 1 1 auto; min-width: 0; height: 4px; accent-color: #6fae4a; cursor: pointer; }
+    .camera-zoom-label { color: #fff; font-size: 0.65rem; width: 30px; text-align: right; }
 
     .kiosko-input { width: 100%; max-width: 300px; padding: 1rem; font-size: clamp(1.2rem, 4vw, 2rem); text-align: center; border: 2px solid rgba(255,255,255,0.4); border-radius: 14px; outline: none; background: rgba(255,255,255,0.08); color: #fff; font-weight: 700; letter-spacing: 2px; transition: all 0.2s; }
     .kiosko-input::placeholder { color: rgba(255,255,255,0.35); letter-spacing: normal; font-weight: 500; }
@@ -218,8 +230,8 @@
             <div class="scan-line"></div>
         </div>
 
-        @if(file_exists(public_path('logo-fruitex.png')))
-            <img src="{{ asset('logo-fruitex.png') }}" alt="Fruitex de México" class="kiosko-brand-logo">
+        @if(file_exists(public_path('logo-empresa.png')))
+            <img src="{{ asset('logo-empresa.png') }}" alt="Fruitex de México" class="kiosko-brand-logo">
         @endif
         <div class="kiosko-eyebrow" style="color:#fff;">Fruitex de México</div>
         <h1 class="kiosko-title" style="color:#fff;">SCA-QR</h1>
@@ -321,6 +333,33 @@
     <video id="video" playsinline></video>
     <div class="camera-scan-line"></div>
     <button class="camera-close" onclick="toggleCamera()"><i class="bi bi-x"></i></button>
+    {{-- V10.3.9-fix: tip de distancia — las webcams de foco fijo (Acteck WM20,
+         Logitech 720p, EMEET...) no enfocan a menos de ~30-40 cm: el QR se
+         sostiene a ~40 cm y se acerca con el ZOOM, no pegándolo al lente --}}
+    <div id="camera-hint" style="position:absolute; top:34px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.75); color:#ffd166; padding:3px 10px; border-radius:8px; font-size:0.68rem; white-space:nowrap; pointer-events:none; opacity:1; transition:opacity 0.8s; z-index:2;">
+        <i class="bi bi-info-circle-fill"></i> QR a ~40 cm · acerque con el zoom
+    </div>
+    {{-- V10.3.8-fix: selector de cámara + zoom para leer QR con webcam externa.
+         V10.3.10-fix: constraints refinadas (30 fps máx., 16:9, resizeMode 'none'
+         = modo nativo sin reescalado por software), sin facingMode (no
+         determinista en PC con varias webcams USB), autoenfoque solo si la
+         cámara lo declara (badge "Foco fijo" vs "AF"), detector QR nativo
+         BarcodeDetector opcional con jsQR de respaldo, lectura por etapas
+         (media resolución → región central 78% → nativa → rescate) y
+         preprocesado de contraste para imagen lavada/oscura --}}
+    <div class="camera-controls">
+        <div class="camera-controls-row">
+            <select id="camera-select" title="Cámara activa">
+                <option value="">Cámaras…</option>
+            </select>
+            <span class="camera-res" id="camera-res" title="Resolución real de captura"></span>
+        </div>
+        <div class="camera-controls-row">
+            <i class="bi bi-zoom-in" style="color:#fff; font-size:0.8rem;"></i>
+            <input type="range" id="camera-zoom" min="1" max="5" step="0.1" value="1" title="Acercar el QR (zoom 1×-5×)">
+            <span class="camera-zoom-label" id="camera-zoom-label">1.0×</span>
+        </div>
+    </div>
 </div>
 
 <div class="kiosko-modal" id="exitModal">
@@ -372,6 +411,14 @@
     let lastCodeProcessed = null;
     let lastCodeTime = 0;
     const COOLDOWN_MS = 3000;
+    // V10.3.8-fix: estado del módulo de cámara en HD
+    let cameraZoom = 1;      // zoom digital aplicado al decodificar (recorte central)
+    let cameraHwZoom = null; // {min,max} cuando la cámara tiene zoom por hardware
+    let cameraLoop = 0;      // token del bucle de escaneo vigente (evita bucles duplicados)
+    let hintTimer = null;    // V10.3.9-fix: timer del tip de distancia (se auto-oculta)
+    let cameraFocus = 'fijo';   // V10.3.10-fix: 'af' | 'single' | 'fijo' según lo que declara la cámara
+    let detectorNativo = null;  // V10.3.10-fix: BarcodeDetector del navegador (opcional; jsQR respalda)
+    const CAM_PREFS = 'scaqr_cam_kiosko'; // preferencias: {deviceId, zoom}
 
     // === BUGFIX: KIOSKO DESACTIVADO en Búsqueda Manual ===
     // Contador de fallos consecutivos del polling de turno. Solo cerramos
@@ -481,6 +528,344 @@
         }
     });
 
+    // ============================================================
+    // CÁMARA DEL KIOSKO
+    // V10.3.8-fix: captura en HD (ideal 1920×1080 — antes el navegador
+    // entregaba 640×480 y el QR se veía borroso/ilegible con webcam
+    // externa), selector de cámara (webcam externa vs integrada),
+    // autoenfoque continuo cuando la cámara lo soporta, zoom 1×-4×
+    // (óptico si existe, digital por recorte central si no) y bucle
+    // limitado a ~10 fps para no saturar el CPU con fotogramas HD.
+    // V10.3.9-fix: además unsharp de rescate para cámaras de foco fijo
+    // (Acteck WM20, Logitech 720p, EMEET 1080p...), tip de distancia al
+    // abrir la cámara y zoom extendido a 1×-5×.
+    // V10.3.10-fix: selección determinista (fuera facingMode), constraints
+    // refinadas (30 fps máx., 16:9, resizeMode 'none' = modo nativo sin
+    // reescalado blando), autoenfoque solo si la cámara lo DECLARA en
+    // getCapabilities (el badge indica "Foco fijo" vs "AF"), detector QR
+    // nativo BarcodeDetector opcional (jsQR de respaldo), 2ª pasada de
+    // región central 78%, preprocesado de contraste en el rescate,
+    // inversionAttempts 'attemptBoth' y 450 ms de estabilización inicial.
+    // ============================================================
+    function leerPrefsCamara() {
+        try { return JSON.parse(localStorage.getItem(CAM_PREFS)) || {}; }
+        catch (e) { return {}; }
+    }
+
+    function guardarPrefsCamara(parcial) {
+        try {
+            const prefs = Object.assign(leerPrefsCamara(), parcial);
+            localStorage.setItem(CAM_PREFS, JSON.stringify(prefs));
+        } catch (e) { /* modo privado: sin persistencia, no es error */ }
+    }
+
+    function marcarErrorCamara(mensaje) {
+        // El kiosko no tiene modales de error propios: el estado se muestra
+        // en el propio selector de cámara y la ventana se puede cerrar con la X.
+        const select = document.getElementById('camera-select');
+        if (select) select.innerHTML = '<option value="">' + mensaje + '</option>';
+        const res = document.getElementById('camera-res');
+        if (res) res.textContent = '';
+        console.error('Kiosko cámara:', mensaje);
+    }
+
+    // V10.3.10-fix: detector QR nativo del navegador (Chrome/Edge lo traen,
+    // acelerado por hardware). Opcional: si el navegador no lo soporta o no
+    // declara qr_code devuelve null y jsQR sigue siendo el lector de respaldo.
+    async function prepararDetectorNativo() {
+        try {
+            if (!('BarcodeDetector' in window)) return null;
+            const formatos = await window.BarcodeDetector.getSupportedFormats();
+            if (!formatos || formatos.indexOf('qr_code') === -1) return null;
+            return new window.BarcodeDetector({ formats: ['qr_code'] });
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // V10.3.10-fix: badge con la resolución real + estado de enfoque declarado
+    // por la cámara. Ej.: "1920×1080 · AF" o "1280×720 · Foco fijo" — se
+    // comprueba de inmediato qué entrega realmente cada webcam conectada.
+    function actualizarBadgeResolucion(w, h) {
+        const resEl = document.getElementById('camera-res');
+        if (!resEl) return;
+        if (!w || !h) { resEl.textContent = ''; return; }
+        const foco = cameraFocus === 'af' ? 'AF'
+            : (cameraFocus === 'single' ? 'AF (1 disparo)' : 'Foco fijo');
+        resEl.textContent = w + '×' + h + ' · ' + foco;
+        resEl.title = cameraFocus === 'fijo'
+            ? 'Cámara de foco fijo: sostener el QR a ~40 cm y acercarlo con el zoom'
+            : 'Cámara con autoenfoque';
+    }
+
+    // V10.3.10-fix: preprocesado de rescate — escala de grises + contraste
+    // automático. Algunas webcams entregan imagen "lavada" (reflejo de luz
+    // tras el QR) u oscura (vestíbulo de noche): se muestrea la luminancia
+    // mínima/máxima del fotograma y se estira a 0-255 para separar los
+    // módulos del QR. Devuelve false si no hay nada que estirar.
+    function mejorarContraste(img) {
+        const d = img.data;
+        const n = d.length >> 2;
+        let mn = 255, mx = 0;
+        for (let i = 0; i < n; i += 17) { // muestreo: 1 de cada 17 píxeles
+            const j = i << 2;
+            const g = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8;
+            if (g < mn) mn = g;
+            if (g > mx) mx = g;
+        }
+        let base = mn, rango = mx - mn;
+        if (rango < 60) { // imagen muy plana: estiramiento más agresivo
+            base = Math.max(0, mn - 25);
+            rango = mx - base;
+        }
+        if (rango < 1) return false;
+        const esc = 255 / rango;
+        for (let i = 0; i < n; i++) {
+            const j = i << 2;
+            let g = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8;
+            g = (g - base) * esc;
+            if (g < 0) g = 0; else if (g > 255) g = 255;
+            d[j] = d[j + 1] = d[j + 2] = g;
+        }
+        return true;
+    }
+
+    async function abrirCamara(deviceId) {
+        // Detener stream previo (cambio de cámara) sin cerrar la ventana
+        if (cameraStream) {
+            cameraStream.getTracks().forEach(t => t.stop());
+            cameraStream = null;
+        }
+        const video = document.getElementById('video');
+        // V10.3.10-fix: constraints refinadas. HD ideal (una cámara 720p sigue
+        // funcionando), 30 fps máx. (menos CPU y exposición más larga en luz
+        // baja), 16:9 ideal y resizeMode 'none': el navegador entrega un modo
+        // NATIVO de la cámara en lugar de un modo reescalado por software
+        // (ese reescalado emborrona el QR). Se eliminó facingMode
+        // 'environment': en una PC con varias webcams USB no es determinista
+        // y podía abrir una cámara distinta de la deseada.
+        const hd = {
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { max: 30 },
+            aspectRatio: { ideal: 16 / 9 },
+            resizeMode: 'none'
+        };
+        const pedir = (videoConstraints) =>
+            navigator.mediaDevices.getUserMedia({ audio: false, video: videoConstraints });
+        try {
+            cameraStream = deviceId
+                ? await pedir(Object.assign({ deviceId: { exact: deviceId } }, hd))
+                : await pedir(hd); // V10.3.10-fix: cámara predeterminada, sin facingMode
+        } catch (e) {
+            // Cámara guardada ya desconectada: reintentar con la predeterminada
+            if (deviceId) cameraStream = await pedir(hd); // V10.3.10-fix: sin facingMode
+            else throw e;
+        }
+        video.srcObject = cameraStream;
+        try { await video.play(); } catch (e) { /* autoplay bloqueado: el usuario ya dio el clic */ }
+
+        const track = cameraStream.getVideoTracks()[0];
+
+        // V10.3.10-fix: capacidades REALES declaradas por la cámara (una sola
+        // consulta): zoom por hardware y modo de enfoque. Una webcam de foco
+        // fijo no declara focusMode y ningún software la convierte en
+        // autofocus: solo se pide lo que existe y el badge lo indica, para
+        // saber qué esperar de cada unidad (Acteck WM20 / Logitech 720p /
+        // EMEET 1080p = foco fijo; C920/C922/Brio = AF).
+        cameraHwZoom = null;
+        cameraFocus = 'fijo';
+        try {
+            const caps = track.getCapabilities ? track.getCapabilities() : {};
+            if (caps.zoom && typeof caps.zoom.min === 'number' && typeof caps.zoom.max === 'number') {
+                cameraHwZoom = { min: caps.zoom.min, max: caps.zoom.max };
+            }
+            if (caps.focusMode && caps.focusMode.indexOf('continuous') !== -1) {
+                await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+                cameraFocus = 'af';
+            } else if (caps.focusMode && caps.focusMode.indexOf('single-shot') !== -1) {
+                await track.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] });
+                cameraFocus = 'single';
+            }
+        } catch (e) {}
+
+        // V10.3.10-fix: detector QR nativo del navegador (si está disponible)
+        detectorNativo = await prepararDetectorNativo();
+
+        // Badge con la resolución real entregada + estado de enfoque
+        const settings = track.getSettings ? track.getSettings() : {};
+        actualizarBadgeResolucion(settings.width, settings.height);
+
+        // Restaurar el último zoom usado (óptico o digital según la cámara)
+        const zoomGuardado = Number(leerPrefsCamara().zoom) || 1;
+        aplicarZoom(zoomGuardado, false);
+
+        // V10.3.9-fix: tip de distancia visible 8 s al abrir la cámara:
+        // con foco fijo el QR se acerca con el ZOOM, no pegándolo al lente
+        const hint = document.getElementById('camera-hint');
+        if (hint) {
+            hint.style.opacity = '1';
+            clearTimeout(hintTimer);
+            hintTimer = setTimeout(() => { hint.style.opacity = '0'; }, 8000);
+        }
+
+        await cargarCamaras(settings.deviceId || deviceId);
+        iniciarBucle();
+    }
+
+    async function cargarCamaras(deviceIdActiva) {
+        const select = document.getElementById('camera-select');
+        if (!select) return;
+        try {
+            const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+            select.innerHTML = '';
+            cams.forEach((c, i) => {
+                const opt = document.createElement('option');
+                opt.value = c.deviceId;
+                opt.textContent = c.label && c.label.trim() ? c.label : ('Cámara ' + (i + 1));
+                if (opt.textContent.length > 30) opt.textContent = opt.textContent.slice(0, 29) + '…';
+                select.appendChild(opt);
+            });
+            const activa = deviceIdActiva || (cams[0] ? cams[0].deviceId : '');
+            select.value = activa;
+            if (activa) guardarPrefsCamara({ deviceId: activa });
+        } catch (e) {
+            select.innerHTML = '<option value="">Cámaras no disponibles</option>';
+        }
+    }
+
+    function aplicarZoom(zoom, guardar = true) {
+        zoom = Math.min(5, Math.max(1, Number(zoom) || 1)); // V10.3.9-fix: zoom hasta 5×
+        const video = document.getElementById('video');
+        const slider = document.getElementById('camera-zoom');
+        const label = document.getElementById('camera-zoom-label');
+        if (slider) slider.value = zoom;
+        if (label) label.textContent = zoom.toFixed(1) + '×';
+
+        const track = cameraStream ? cameraStream.getVideoTracks()[0] : null;
+        if (cameraHwZoom && track) {
+            // Zoom óptico: el propio sensor acerca → se decodifica el cuadro completo
+            const min = cameraHwZoom.min, max = cameraHwZoom.max;
+            const hw = min + ((zoom - 1) / 4) * (max - min); // V10.3.9-fix: slider 1×-5× → rango de la cámara
+            track.applyConstraints({ advanced: [{ zoom: hw }] }).catch(() => {});
+            cameraZoom = 1;
+            video.style.transform = '';
+        } else {
+            // Zoom digital: previsualización escalada + recorte central al decodificar
+            cameraZoom = zoom;
+            video.style.transform = zoom > 1 ? 'scale(' + zoom + ')' : '';
+        }
+        if (guardar) guardarPrefsCamara({ zoom: zoom });
+    }
+
+    // V10.3.9-fix: máscara de enfoque (unsharp) en tiempo real.
+    // Las webcams de foco fijo (Acteck WM20, Logitech 720p tipo C270,
+    // EMEET 1080p, etc.) no pueden enfocar a menos de ~30-40 cm: a esa
+    // distancia el QR sale ligeramente desenfocado AUNQUE la captura sea
+    // HD. Este kernel 3×3 de realce recupera parte de los bordes de los
+    // módulos del QR y le da a jsQR una segunda oportunidad sobre el
+    // mismo fotograma. Se muta img.data in place leyendo de una copia
+    // para no contaminar los vecinos ya filtrados.
+    function enfocarImageData(img, w, h) {
+        const s = img.data;
+        const orig = new Uint8ClampedArray(s);
+        const fila = w * 4;
+        for (let y = 1; y < h - 1; y++) {
+            for (let x = 1; x < w - 1; x++) {
+                const i = y * fila + x * 4;
+                for (let c = 0; c < 3; c++) {
+                    const v = 5 * orig[i + c]
+                        - orig[i - 4 + c] - orig[i + 4 + c]
+                        - orig[i - fila + c] - orig[i + fila + c];
+                    s[i + c] = v < 0 ? 0 : (v > 255 ? 255 : v);
+                }
+            }
+        }
+    }
+
+    function iniciarBucle() {
+        const video = document.getElementById('video');
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        const miLoop = ++cameraLoop;
+
+        // V10.3.9-fix: parámetro de rescate. V10.3.10-fix: ahora preprocesa
+        // contraste automático (imagen lavada/oscura) + unsharp (foco fijo
+        // levemente desenfocado), en ese orden, antes de jsQR.
+        const decodificar = (w, h, sx, sy, sw, sh, rescatar) => {
+            canvas.width = w;
+            canvas.height = h;
+            context.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
+            const img = context.getImageData(0, 0, w, h);
+            if (rescatar) {
+                mejorarContraste(img);
+                enfocarImageData(img, w, h);
+            }
+            // V10.3.10-fix: 'attemptBoth' (default de jsQR, ahora explícito):
+            // tolera QR con contraste invertido (p. ej. pantalla en modo oscuro)
+            return jsQR(img.data, w, h, { inversionAttempts: 'attemptBoth' });
+        };
+
+        let intento = 0; // V10.3.9-fix: contador de ticks (el rescate corre 1 de cada 2)
+        // V10.3.10-fix: tick async: BarcodeDetector.detect es una promesa. El
+        // siguiente tick se programa AL TERMINAR el trabajo para no encimar
+        // detecciones sobre fotogramas a medias.
+        const tick = async () => {
+            if (!cameraStream || miLoop !== cameraLoop) return; // bucle reemplazado o cámara cerrada
+            if (!isProcessing && video.readyState === video.HAVE_ENOUGH_DATA) {
+                intento++;
+                try {
+                    let code = null;
+                    // V10.3.10-fix: 1) detector QR NATIVO del navegador cuando
+                    // existe (más rápido y robusto; Chrome/Edge en Windows lo
+                    // traen acelerado). Solo sin zoom: el <video> muestra el
+                    // encuadre completo y es exactamente lo que debe leerse.
+                    if (detectorNativo && cameraZoom <= 1) {
+                        try {
+                            const hallados = await detectorNativo.detect(video);
+                            if (hallados && hallados.length) code = { data: hallados[0].rawValue };
+                        } catch (e) { /* detector nativo falló en este fotograma: sigue jsQR */ }
+                    }
+                    // 2) jsQR por etapas (respaldo universal: Firefox/Safari/Linux)
+                    if (!code) {
+                        if (cameraZoom > 1) {
+                            // Con zoom digital se decodifica SOLO la región ampliada
+                            // (el mismo encuadre que se ve en la previsualización).
+                            const z = cameraZoom;
+                            const cw = Math.round(video.videoWidth / z), ch = Math.round(video.videoHeight / z);
+                            const sx = (video.videoWidth - cw) / 2, sy = (video.videoHeight - ch) / 2;
+                            code = decodificar(cw, ch, sx, sy, cw, ch);
+                            // Rescate con preprocesado (QR leve fuera de foco o lavado)
+                            if (!code && intento % 2 === 0) code = decodificar(cw, ch, sx, sy, cw, ch, true);
+                        } else {
+                            // 1ª pasada a media resolución: QR cercano (grande) sin cargar el CPU
+                            const w2 = video.videoWidth >> 1, h2 = video.videoHeight >> 1;
+                            if (w2 && h2) code = decodificar(w2, h2, 0, 0, video.videoWidth, video.videoHeight);
+                            // 2ª pasada: región central 78% a resolución nativa — QR a media
+                            // distancia que no llena el cuadro (V10.3.10-fix)
+                            if (!code) {
+                                const rw = Math.round(video.videoWidth * 0.78), rh = Math.round(video.videoHeight * 0.78);
+                                const rx = (video.videoWidth - rw) / 2, ry = (video.videoHeight - rh) / 2;
+                                code = decodificar(rw, rh, rx, ry, rw, rh);
+                            }
+                            // 3ª pasada a resolución nativa completa: QR lejano o pequeño
+                            if (!code) code = decodificar(video.videoWidth, video.videoHeight, 0, 0, video.videoWidth, video.videoHeight);
+                            // 4ª pasada de rescate con preprocesado (contraste + unsharp,
+                            // 1 de cada 2 ticks para no saturar el CPU): foco fijo
+                            // levemente desenfocado o imagen lavada/oscura
+                            if (!code && intento % 2 === 0) code = decodificar(video.videoWidth, video.videoHeight, 0, 0, video.videoWidth, video.videoHeight, true);
+                        }
+                    }
+                    if (code) procesarCodigo(code.data, 'kiosco');
+                } catch (e) { /* fotograma corrupto: se reintenta en el siguiente tick */ }
+            }
+            if (cameraStream && miLoop === cameraLoop) setTimeout(tick, 80); // ~10 fps
+        };
+        // V10.3.10-fix: 450 ms de estabilización inicial (antes 300): margen para
+        // que autofocus/exposición/balance de blancos se asienten antes de leer
+        setTimeout(tick, 450);
+    }
+
     async function toggleCamera() {
         const view = document.getElementById('camera-view');
         if (cameraStream) {
@@ -490,34 +875,40 @@
             return;
         }
         view.style.display = 'block';
-        const video = document.getElementById('video');
-        cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        video.srcObject = cameraStream;
-        video.play();
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        const tick = () => {
-            if (!cameraStream) return;
-            if (!isProcessing && video.readyState === video.HAVE_ENOUGH_DATA) {
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-                const code = jsQR(imageData.data, imageData.width, imageData.height);
-                if (code) procesarCodigo(code.data, 'kiosco');
-            }
-            requestAnimationFrame(tick);
-        };
-        requestAnimationFrame(tick);
+        try {
+            await abrirCamara(leerPrefsCamara().deviceId);
+        } catch (e) {
+            marcarErrorCamara('Sin acceso a la cámara');
+            cameraStream = null;
+        }
     }
+
+    // V10.3.8-fix: controles de la ventana de cámara (selector + zoom)
+    document.getElementById('camera-select').addEventListener('change', async function() {
+        guardarPrefsCamara({ deviceId: this.value });
+        if (!cameraStream) return; // cámara cerrada: solo se guarda la preferencia
+        try {
+            await abrirCamara(this.value); // reemplaza stream y bucle sin cerrar la ventana
+        } catch (e) {
+            marcarErrorCamara('No se pudo abrir la cámara');
+            cameraStream = null;
+        }
+    });
+    document.getElementById('camera-zoom').addEventListener('input', function() {
+        aplicarZoom(this.value);
+    });
 
     function showManualEntry() {
         switchScreen('screen-manual');
         document.getElementById('manual-input').focus();
     }
+    
     function submitManual() {
-        const val = document.getElementById('manual-input').value.trim();
-        if(val) procesarCodigo(val, 'manual');
+        const input = document.getElementById('manual-input');
+        const val = input.value.trim();
+        if (!val) return;
+        input.value = ''; // Limpiar inmediatamente para evitar re-envíos
+        procesarCodigo(val, 'manual');
     }
 
     // ===== Procesar código (con lock anti-doble) =====
@@ -598,9 +989,15 @@
         if ((data.success !== false) && data.autorizado) {
             mostrarExito(data);
         } else if ((data.success !== false) && data.pendiente) {
-            const msg = data.tipo_pendiente === 'justificacion'
-                ? 'Acceso fuera de horario. El guardia debe autorizar su acceso.'
-                : 'Espere al guardia para revisión.';
+            // FIX interplantas: el mensaje identifica si es entrada o salida,
+            // en vez del genérico "Acceso fuera de horario".
+            let msg;
+            if (data.tipo_pendiente === 'justificacion') {
+                const tipo = (data.tipo_evento === 'salida') ? 'salida' : 'entrada';
+                msg = (tipo === 'salida' ? 'Salida' : 'Entrada') + ' fuera de horario. El guardia debe autorizar su ' + tipo + '.';
+            } else {
+                msg = 'Espere al guardia para revisión.';
+            }
             document.getElementById('waiting-msg').textContent = msg;
             switchScreen('screen-waiting');
             iniciarPollingBitacora(data.bitacora_id);
@@ -619,40 +1016,108 @@
         document.getElementById('success-name').textContent = data.persona?.nombre || 'Registrado';
         document.getElementById('success-info').textContent = `${data.persona?.puesto || ''} - ${data.persona?.tipo_empleado || ''}${data.persona?.planta ? ' · ' + data.persona.planta : ''}`;
         document.getElementById('success-msg').textContent = data.message || '';
+        if (resetScreenTimer) clearTimeout(resetScreenTimer);
         switchScreen('screen-success');
-        setTimeout(resetToWelcome, 5000);
+        resetScreenTimer = setTimeout(resetToWelcome, 5000);
     }
 
     function mostrarDenegado(msg) {
         document.getElementById('denied-msg').textContent = msg;
+        if (resetScreenTimer) clearTimeout(resetScreenTimer);
         switchScreen('screen-denied');
-        setTimeout(resetToWelcome, 5000);
+        resetScreenTimer = setTimeout(resetToWelcome, 5000);
     }
 
     // ===== Polling de bitácora (cada 2s) =====
+    // Variable para recordar el último tipo de pendiente mostrado al empleado.
+    // Así detectamos cuando cambia de 'justificacion' a 'revision' (o viceversa)
+    // y actualizamos el mensaje en la pantalla de espera.
+    let ultimoTipoPendienteMostrado = null;
+
+    // Protección contra peticiones de polling simultáneas y respuestas duplicadas
+    let pollingRequestInFlight = false;
+    let pollingBitacoraResuelto = false;
+    let resetScreenTimer = null;
+
     async function iniciarPollingBitacora(bitacoraId) {
+        clearInterval(pollingInterval);
+        pollingRequestInFlight = false;
+        pollingBitacoraResuelto = false;
+        ultimoTipoPendienteMostrado = null;
+
         pollingInterval = setInterval(async () => {
+            // Si ya se resolvió, ignorar
+            if (pollingBitacoraResuelto) return;
+            // No permitir peticiones simultáneas
+            if (pollingRequestInFlight) return;
+            pollingRequestInFlight = true;
+
             try {
                 const res = await fetch(`/api/scan/status/${bitacoraId}`, { cache: 'no-store' });
-                if (!res.ok) return; // esperar siguiente vuelta
+                if (!res.ok) return;
                 const data = await res.json();
-                // BUGFIX: Tolerante al wrapper {data: {...}} de Laravel.
                 const payload = (data && data.data && typeof data.data === 'object' && !Array.isArray(data.data))
                     ? data.data
                     : data;
+
+                // Otra petición pudo resolver mientras esta estaba en vuelo
+                if (pollingBitacoraResuelto) return;
+
+                // Bitácora inválida
+                if (payload.estado === 'invalido' || (!payload.autorizado && !payload.denegado && !payload.pendiente)) {
+                    pollingBitacoraResuelto = true;
+                    clearInterval(pollingInterval);
+                    mostrarDenegado('Ocurrió un error al validar su acceso. Vuelva a escanear.');
+                    return;
+                }
+
+                // AUTORIZADO
                 if (payload.autorizado) {
+                    pollingBitacoraResuelto = true;
                     clearInterval(pollingInterval);
                     mostrarExito({
-                        tipo_evento: 'autorizado',
-                        persona: { nombre: 'Autorizado', puesto: '', tipo_empleado: '', planta: '', foto: 'https://ui-avatars.com/api/?name=OK&background=28a745&color=fff' },
-                        message: 'Acceso autorizado por el guardia.'
+                        tipo_evento: payload.tipo_evento || 'autorizado',
+                        persona: payload.persona || { 
+                            nombre: 'Autorizado', puesto: '', tipo_empleado: '', planta: '', 
+                            foto: 'https://ui-avatars.com/api/?name=OK&background=28a745&color=fff' 
+                        },
+                        message: payload.message || 'Acceso autorizado por el guardia.'
                     });
-                    setTimeout(resetToWelcome, 5000);
-                } else if (payload.denegado) {
-                    clearInterval(pollingInterval);
-                    mostrarDenegado('El guardia denegó el acceso.');
+                    return;
                 }
-            } catch(e) { console.error('Error polling:', e); }
+
+                // DENEGADO
+                if (payload.denegado) {
+                    pollingBitacoraResuelto = true;
+                    clearInterval(pollingInterval);
+                    let msg = 'El guardia denegó el acceso.';
+                    if (payload.motivo === 'cerrado_sin_resolver') msg = 'El guardia cerró su turno. Vuelva a escanear.';
+                    else if (payload.motivo === 'rechazado_guardia') msg = 'El guardia rechazó su acceso.';
+                    else if (payload.motivo === 'pendiente_sin_resolver') msg = 'Su acceso anterior quedó pendiente. Vuelva a escanear.';
+                    mostrarDenegado(msg);
+                    return;
+                }
+
+                // PENDIENTE
+                if (payload.pendiente) {
+                    const tipoActual = payload.tipo_pendiente;
+                    if (ultimoTipoPendienteMostrado !== tipoActual) {
+                        let msg;
+                        if (tipoActual === 'justificacion') {
+                            const tipo = (payload.tipo_evento === 'salida') ? 'salida' : 'entrada';
+                            msg = (tipo === 'salida' ? 'Salida' : 'Entrada') + ' fuera de horario. El guardia debe autorizar su ' + tipo + '.';
+                        } else {
+                            msg = 'Justificación completada. Espere aquí, el guardia debe realizar revisión.';
+                        }
+                        document.getElementById('waiting-msg').textContent = msg;
+                        ultimoTipoPendienteMostrado = tipoActual;
+                    }
+                }
+            } catch(e) {
+                console.error('Error polling:', e);
+            } finally {
+                pollingRequestInFlight = false;
+            }
         }, 2000);
     }
 
@@ -662,13 +1127,17 @@
     }
 
     function resetToWelcome() {
+        clearInterval(pollingInterval);
+        pollingRequestInFlight = false;
+        pollingBitacoraResuelto = false;
+        ultimoTipoPendienteMostrado = null;
+        if (resetScreenTimer) {
+            clearTimeout(resetScreenTimer);
+            resetScreenTimer = null;
+        }
         switchScreen('screen-welcome');
         document.getElementById('manual-input').value = '';
         isProcessing = false;
-        clearInterval(pollingInterval);
-        // BUGFIX: Al volver a welcome, reiniciamos el contador de fallos de
-        // turno para que el kiosko continúe operativo tras una operación
-        // manual.
         turnoFailCount = 0;
         scannerInput.focus();
     }

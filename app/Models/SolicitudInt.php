@@ -31,6 +31,16 @@
 //   - rechazado: rechazado en cualquier paso.
 //   - aprobado_parcial: QUEDA EN EL ENUM pero no se usa en la lógica actual
 //     (las grupales son todos-o-nada: si uno se rechaza, toda se rechaza).
+//
+// ────────────────────────────────────────────────────────────────────────
+// V10.3 · CAMBIO #23: el enum `tipo` ahora admite 3 valores:
+//   - pase_salida:      salir temprano (vigencia = turno, auto-calculada).
+//   - interplantas:     ir a OTRA planta (doble aprobación).
+//   - permiso_entrada:  NUEVO — entrar a la PROPIA planta fuera de turno
+//     (muy temprano, domingo/fin de semana, turno vencido o sin turno).
+//     Origen = destino = planta del beneficiario; aprobación simple
+//     (solo origen, igual que pase_salida).
+// ───────────────────────────────────────────────────────────────────────
 
 namespace App\Models;
 
@@ -43,9 +53,9 @@ class SolicitudInt extends Model
 
     protected $fillable = [
         'creador_empleado_id',          // FK lógica a sitec.empleados.id_empleado
-        'tipo',                         // pase_salida | interplantas
+        'tipo',                         // pase_salida | interplantas | permiso_entrada (V10.3)
         'id_planta_origen',             // planta de dónde sale
-        'id_planta_destino',            // planta a dónde va (= origen si pase_salida)
+        'id_planta_destino',            // planta a dónde va (= origen si pase_salida/permiso_entrada)
         'fecha_inicio',
         'fecha_fin',
         'motivo',
@@ -123,6 +133,15 @@ class SolicitudInt extends Model
         return $this->tipo === 'pase_salida';
     }
 
+    // V10.3 · CAMBIO #23: helper para el nuevo tipo.
+    /**
+     * ¿Es un permiso de entrada? (entrada fuera de turno a planta propia)
+     */
+    public function esPermisoEntrada(): bool
+    {
+        return $this->tipo === 'permiso_entrada';
+    }
+
     /**
      * ¿Está vigente y aprobada? (para validar acceso en scanner)
      *
@@ -184,6 +203,19 @@ class SolicitudInt extends Model
      *     → devolver 'expirado'
      *   - Si no → devolver el estado original.
      */
+    /**
+     * ACCESSOR: estado real de la solicitud, considerando expiración.
+     *
+     * FIX Bug 7: Este accessor ahora es "puro" (solo cálculo, sin writes).
+     * Antes hacía save() + UPDATE masivo a solicitud_empleados, causando
+     * writes silenciosos en contextos de solo lectura (show_int, show_ext).
+     *
+     * Ahora solo calcula el estado en runtime. La persistencia en BD la hace:
+     * 1. El cron ExpirarSolicitudes (cada 5 min).
+     * 2. El método explícito expirarSiVencido() (llamado desde ScannerController).
+     *
+     * Uso: $solicitud->estado_actual  (NO $solicitud->estado)
+     */
     public function getEstadoActualAttribute(): string
     {
         // Si ya está en un estado terminal, no hacer nada
@@ -191,21 +223,41 @@ class SolicitudInt extends Model
             return $this->estado;
         }
 
-        // Si la vigencia ya pasó, expirar
+        // Si la vigencia ya pasó, devolver 'expirado' (sin escribir BD)
+        if ($this->fecha_fin && $this->fecha_fin < now()) {
+            return 'expirado';
+        }
+
+        return $this->estado;
+    }
+
+    /**
+     * FIX Bug 7: Método explícito para persistir la expiración en BD.
+     *
+     * Llamar SOLO desde contextos de escritura (ScannerController, AprobacionController).
+     * NO llamar desde vistas ni listados.
+     *
+     * Hace lo que el accessor hacía antes:
+     * 1. Marca la solicitud como 'expirado' en BD.
+     * 2. Expira los empleados de la solicitud grupal.
+     */
+    public function expirarSiVencido(): void
+    {
+        // Si ya está terminal, no hacer nada
+        if (in_array($this->estado, ['rechazado', 'expirado'])) {
+            return;
+        }
+
+        // Si venció, persistir
         if ($this->fecha_fin && $this->fecha_fin < now()) {
             $this->estado = 'expirado';
             $this->save();
 
             // Expirar también los empleados de esta solicitud grupal.
-            // Solo los que estaban 'pendiente' o 'aprobado' (no tocar 'rechazado').
             \App\Models\SolicitudEmpleado::where('id_solicitud_int', $this->id_solicitud_int)
                 ->whereIn('estado', ['pendiente', 'aprobado', 'aprobado_origen'])
                 ->update(['estado' => 'expirado']);
-
-            return 'expirado';
         }
-
-        return $this->estado;
     }
 
     /**

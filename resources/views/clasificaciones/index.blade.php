@@ -14,16 +14,19 @@
 --}}
 @extends('layouts.app')
 
-@section('title', 'Clasificaciones → Plantas')
+@section('title', 'Clasificaciones por planta')
 
 @section('content')
-<div class="mb-4">
-    <h1 class="h3 mb-0">Clasificaciones → Plantas</h1>
-    <p class="text-muted mb-0">
+<div class="sca-page-head legacy-page-head">
+    <div>
+    <div class="sca-page-eyebrow"><i class="bi bi-diagram-3" aria-hidden="true"></i> Configuración</div>
+    <h1 class="sca-page-title">Clasificaciones por planta</h1>
+    <p class="sca-page-subtitle">
         Configure a qué planta pertenece cada clasificación de sitec.
         Una vez asignado, todos los empleados con esa clasificación quedan
         automáticamente mapeados a esa planta.
     </p>
+    </div>
 </div>
 
 <div class="alert alert-info d-flex align-items-center">

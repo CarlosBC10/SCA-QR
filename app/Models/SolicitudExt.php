@@ -96,32 +96,49 @@ class SolicitudExt extends Model
      *     → devolver 'expirado'
      *   - Si no → devolver el estado original.
      */
+    /**
+     * ACCESSOR: estado real de la solicitud, considerando expiración.
+     *
+     * FIX Bug 7: Este accessor ahora es "puro" (solo cálculo, sin writes).
+     * Antes hacía save() + UPDATE masivo invalidando QRs, con un bug latente:
+     * invalidaba QRs de externos DENTRO de planta (el cron sí los respeta).
+     *
+     * Ahora solo calcula el estado en runtime.
+     */
     public function getEstadoActualAttribute(): string
     {
-        // Si ya está en un estado terminal, no hacer nada
         if (in_array($this->estado, ['rechazado', 'expirado'])) {
             return $this->estado;
         }
 
-        // Si la vigencia ya pasó, expirar
         if ($this->fecha_fin && $this->fecha_fin < now()) {
-            $this->estado = 'expirado';
-            $this->save();
-
-            // Invalidar QRs de los externos de esta solicitud.
-            // Solo los 'autorizado' pasan a 'expirado' (los 'pendiente' y
-            // 'cancelado' se quedan como están, no tenían QR activo).
-            \App\Models\SolicitudExternoDetalle::where('id_solicitud_ext', $this->id_solicitud_ext)
-                ->where('estado_qr', 'autorizado')
-                ->update([
-                    'estado_qr' => 'expirado',
-                    'codigo_qr' => null,  // se invalida el código
-                ]);
-
             return 'expirado';
         }
 
         return $this->estado;
+    }
+
+    /**
+     * FIX Bug 7: Método explícito para persistir la expiración en BD.
+     *
+     * Llamar SOLO desde contextos de escritura (ScannerController).
+     *
+     * FIX Bug latente: Ya NO hace UPDATE masivo ciego. Delega la invalidación
+     * de QRs al cron ExpirarSolicitudes, que SÍ respeta externos dentro de planta.
+     * Solo marca la solicitud como expirada.
+     */
+    public function expirarSiVencido(): void
+    {
+        if (in_array($this->estado, ['rechazado', 'expirado'])) {
+            return;
+        }
+
+        if ($this->fecha_fin && $this->fecha_fin < now()) {
+            $this->estado = 'expirado';
+            $this->save();
+            // La invalidación de QRs la hace el cron ExpirarSolicitudes,
+            // que verifica si el externo está dentro de planta antes de invalidar.
+        }
     }
 
     /**

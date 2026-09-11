@@ -27,6 +27,15 @@ class Bitacora extends Model
         'id_planta',
         'revision_exhaustiva',
         'id_justificacion',
+        // V10.3 · CAMBIO #24: FK LÓGICO a la solicitud que autorizó el
+        // acceso. Sin FK física (decisión de diseño: bitacora es
+        // append-only y debe soportar millones de filas). Ruteo según
+        // persona_id (misma convención polimórfica):
+        //   persona_id "E-x"  → solicitudes_ext.id_solicitud_ext
+        //   persona_id numérico → solicitudes_int.id_solicitud_int
+        // NULL = acceso estándar (sin permiso) o registro histórico
+        // previo a V10.3. Columna creada con el Script 1 (Etapa 1 BD).
+        'id_solicitud',
     ];
 
     protected $casts = [
@@ -64,6 +73,31 @@ class Bitacora extends Model
     public function justificacion()
     {
         return $this->belongsTo(JustificacioneHorario::class, 'id_justificacion', 'id_justificacion');
+    }
+
+    // ============================================================
+    // V10.3 · CAMBIO #24: resolución del FK lógico id_solicitud
+    // ============================================================
+    // Devuelve la solicitud referenciada por bitacora.id_solicitud,
+    // ruteando por el prefijo de persona_id:
+    //   "E-x"     → SolicitudExt (id_solicitud_ext)
+    //   numérico  → SolicitudInt (id_solicitud_int)
+    // NULL si no hay referencia o si el id no existe (huérfano — el
+    // lector de bitácora lo marca como "inconsistente", no lo oculta).
+    // No se usa relación Eloquent polimórfica real porque el destino
+    // depende del valor de OTRA columna (persona_id), no del formato
+    // del id mismo.
+    public function solicitudReferenciada(): ?Model
+    {
+        if (empty($this->id_solicitud) || !preg_match('/^\d+$/', trim((string) $this->id_solicitud))) {
+            return null;
+        }
+
+        if (str_starts_with((string) $this->persona_id, 'E-')) {
+            return \App\Models\SolicitudExt::find((int) $this->id_solicitud);
+        }
+
+        return \App\Models\SolicitudInt::find((int) $this->id_solicitud);
     }
 
     public function hallazgo()

@@ -4,9 +4,12 @@
 @section('title', 'Solicitudes')
 
 @section('content')
-<div class="mb-4">
-    <h1 class="h3 mb-0 fw-bold">Módulo de Solicitudes</h1>
-    <p class="text-muted mb-0">Seleccione una opción para continuar</p>
+<div class="sca-page-head legacy-page-head">
+    <div>
+    <div class="sca-page-eyebrow"><i class="bi bi-arrow-left-right" aria-hidden="true"></i> Operación</div>
+    <h1 class="sca-page-title">Solicitudes</h1>
+    <p class="sca-page-subtitle">Elige la acción que necesitas realizar.</p>
+    </div>
 </div>
 
 <div class="row g-4">
@@ -48,7 +51,8 @@
                     <h5 class="fw-bold mb-1">Nueva Solicitud</h5>
                     <p class="text-muted small mb-2">
                         @if(Auth::user()->isEmpleado())
-                            Pase de salida o interplantas
+                            {{-- V10.3 · CAMBIO #36: texto actualizado con el nuevo tipo --}}
+                            Pase de salida, interplantas o permiso de entrada
                         @else
                             Crear cualquier tipo de solicitud
                         @endif

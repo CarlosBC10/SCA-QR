@@ -322,6 +322,101 @@ class NotificacionService
     }
 
     // ============================================================
+    // V10.3.5-fix · DESTINATARIOS DE CORREO (alcance por planta)
+    // ============================================================
+    //
+    // ANTES (V7): el correo de "nueva solicitud" se enviaba a TODOS los
+    // usuarios Aprobador/Admin/Superadmin del sistema, SIN filtro de
+    // planta → aprobadores de plantas ajenas recibían correos que no
+    // les correspondían (hallazgo del usuario).
+    //
+    // Alcance CORRECTO (espejo de las notificaciones in-app):
+    //   · Pendiente creada por Empleado → aprobadores de la planta
+    //     RESPONSABLE de aprobar (origen si pendiente_origen; destino
+    //     en el resto) + todos los Admin/Superadmin.
+    //   · Auto-aprobada al crearla (creador Aprobador+) → aprobadores
+    //     de las plantas involucradas + Admin/Superadmin, sin el creador.
+    //   · Aprobada directamente por Admin/Superadmin (resuelve una
+    //     pendiente en un solo paso) → aprobadores de las plantas
+    //     involucradas + Admin/Superadmin, sin aprobador ni creador.
+
+    /**
+     * V10.3.5-fix: destinatarios cuando un Empleado crea una solicitud
+     * PENDIENTE. Aprobadores de la planta responsable + Admin/Superadmin.
+     */
+    public static function destinatariosCorreoNuevaPendiente(SolicitudInt|SolicitudExt $solicitud): Collection
+    {
+        $plantaId = self::plantaResponsablePendiente($solicitud);
+
+        $usuarios = $plantaId !== null
+            ? self::obtenerAprobadoresDePlanta($plantaId)
+            : collect();
+
+        $admins = UsuarioSca::whereHas('rol', fn($q) => $q->whereIn('nombre', ['Admin', 'Superadmin']))
+            ->whereNull('fecha_baja')
+            ->get();
+
+        return $usuarios->merge($admins)->unique('id_usuario_sca')->values();
+    }
+
+    /**
+     * V10.3.5-fix: destinatarios cuando un Aprobador+ CREÓ y auto-aprobó
+     * una solicitud (pase/permiso/ext, o interplantas siendo Admin/Super).
+     * Aprobadores de las plantas involucradas + Admin/Super, sin el creador
+     * (él ya sabe: lo acaba de hacer).
+     */
+    public static function destinatariosCorreoAutoAprobada(SolicitudInt|SolicitudExt $solicitud, $creador): Collection
+    {
+        $usuarios = collect();
+        foreach (self::plantasInvolucradas($solicitud) as $plantaId) {
+            $usuarios = $usuarios->merge(self::obtenerAprobadoresDePlanta($plantaId));
+        }
+
+        $admins = UsuarioSca::whereHas('rol', fn($q) => $q->whereIn('nombre', ['Admin', 'Superadmin']))
+            ->whereNull('fecha_baja')
+            ->get();
+
+        return $usuarios->merge($admins)
+            ->unique('id_usuario_sca')
+            ->where('id_usuario_sca', '!=', $creador->id_usuario_sca)
+            ->values();
+    }
+
+    /**
+     * V10.3.5-fix: destinatarios cuando un Admin/Superadmin APRUEBA
+     * directamente (en un solo paso) una solicitud que estaba pendiente.
+     * Aprobadores de las plantas involucradas + Admin/Super, sin el
+     * aprobador ni el creador (ambos ya fueron notificados por su lado).
+     */
+    public static function destinatariosCorreoAprobacionDirecta(SolicitudInt|SolicitudExt $solicitud, $aprobador): Collection
+    {
+        $usuarios = self::destinatariosCorreoAutoAprobada($solicitud, $aprobador);
+
+        $creador = self::obtenerUsuarioCreador($solicitud);
+        if ($creador) {
+            $usuarios = $usuarios->where('id_usuario_sca', '!=', $creador->id_usuario_sca);
+        }
+
+        return $usuarios->values();
+    }
+
+    /**
+     * V10.3.5-fix: planta responsable de la próxima aprobación de una
+     * solicitud pendiente (espejo de nuevaSolicitudPendiente):
+     * INT pendiente_origen → planta origen; INT pendiente/pendiente_destino
+     * → planta destino; EXT → planta destino.
+     */
+    private static function plantaResponsablePendiente(SolicitudInt|SolicitudExt $solicitud): ?int
+    {
+        if ($solicitud instanceof SolicitudInt) {
+            return $solicitud->estado === 'pendiente_origen'
+                ? $solicitud->id_planta_origen
+                : $solicitud->id_planta_destino;
+        }
+        return $solicitud->id_planta_destino;
+    }
+
+    // ============================================================
     // CASO E: Nueva solicitud pendiente (creada por Empleado)
     // ============================================================
 
@@ -336,14 +431,9 @@ class NotificacionService
      */
     public static function nuevaSolicitudPendiente(SolicitudInt|SolicitudExt $solicitud): void
     {
-        if ($solicitud instanceof SolicitudInt) {
-            $plantaId = $solicitud->estado === 'pendiente_origen'
-                ? $solicitud->id_planta_origen
-                : $solicitud->id_planta_destino;
-        } else {
-            // SolicitudExt siempre pendiente (una sola aprobación, en destino)
-            $plantaId = $solicitud->id_planta_destino;
-        }
+        // V10.3.5-fix: lógica extraída a plantaResponsablePendiente()
+        // (misma planta que usa el correo de destinatariosCorreoNuevaPendiente).
+        $plantaId = self::plantaResponsablePendiente($solicitud);
 
         if (!$plantaId) return;
 
@@ -381,9 +471,10 @@ class NotificacionService
     {
         if ($solicitud instanceof SolicitudInt) {
             return match($solicitud->tipo) {
-                'pase_salida'  => 'Pase de Salida',
-                'interplantas' => 'Interplantas',
-                default        => $solicitud->tipo,
+                'pase_salida'     => 'Pase de Salida',
+                'interplantas'    => 'Interplantas',
+                'permiso_entrada' => 'Permiso de Entrada', // V10.3-fix (hallazgo usuario)
+                default           => $solicitud->tipo,
             };
         }
 

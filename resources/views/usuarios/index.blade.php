@@ -11,13 +11,14 @@
 @section('title', 'Gestión de Usuarios')
 
 @section('content')
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="sca-page-head legacy-page-head">
     <div>
-        <h1 class="h3 mb-0">Gestión de Usuarios</h1>
-        <p class="text-muted mb-0">Usuarios del sistema con sus roles y plantas</p>
+        <div class="sca-page-eyebrow"><i class="bi bi-people" aria-hidden="true"></i> Gestión</div>
+        <h1 class="sca-page-title">Usuarios</h1>
+        <p class="sca-page-subtitle">Administra cuentas, roles, plantas y estado de acceso al sistema.</p>
     </div>
     <a href="{{ route('usuarios.create') }}" class="btn btn-success">
-        <i class="bi bi-person-plus"></i> Nuevo Usuario
+        <i class="bi bi-person-plus me-1"></i> Nuevo usuario
     </a>
 </div>
 

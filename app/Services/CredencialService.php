@@ -15,6 +15,8 @@ class CredencialService
      */
     public static function generarPngIndividual(SolicitudExt $solicitud, SolicitudExternoDetalle $detalle): string
     {
+        // FIX 8: Asegurar que las relaciones estén cargadas (defensa en profundidad)
+        $solicitud->loadMissing(['plantaDestino', 'anfitrion.puesto']);
         $logoBase64 = self::generarLogoBase64();
 
         $html = view('credenciales.credencial_individual', [
@@ -49,6 +51,8 @@ class CredencialService
      */
     public static function generarPdfTodas(SolicitudExt $solicitud): string
     {
+        // FIX 8: Asegurar que las relaciones estén cargadas
+        $solicitud->loadMissing(['plantaDestino', 'anfitrion.puesto', 'externos.externo']);
         $detalles = $solicitud->externos->filter(function($d) {
             return $d->estado_qr === 'autorizado' && $d->codigo_qr;
         });

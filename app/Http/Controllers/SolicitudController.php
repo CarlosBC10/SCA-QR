@@ -145,7 +145,9 @@ class SolicitudController extends Controller
 
         DB::beginTransaction();
         try {
-            if (in_array($tipo, ['pase_salida', 'interplantas'])) {
+            // V10.3 · CAMBIO #12: 'permiso_entrada' se enruta a la rama INTERNA
+            // (solicitudes_int). El enum del Script 2 de BD ya lo admite.
+            if (in_array($tipo, ['pase_salida', 'interplantas', 'permiso_entrada'])) {
                 return $this->storeSolicitudInt($request, $user, $tipo);
             } else {
                 return $this->storeSolicitudExt($request, $user, $tipo);
@@ -184,8 +186,42 @@ class SolicitudController extends Controller
             $plantaOrigenId = $user->planta_id;
         }
 
+        // ============================================================
+        // V10.3.2-fix (restaurado de V10.3.1, hallazgo 3 del usuario):
+        // regla de planta origen según "para quién" es la solicitud:
+        //   - Admin/Super + "otros"            → cualquier planta activa.
+        //   - Admin/Super + incluye al creador → SOLO su planta asignada.
+        // El formulario ya bloquea el selector (JS, ver create.blade),
+        // pero un POST artesanal podría mandar otra planta: esto lo taja
+        // en el servidor. Defensa en profundidad. (La revisión de ChatGPT
+        // se basó en el zip previo a V10.3.1 y no traía esta validación.)
+        // ============================================================
+        $incluyeCreador = $request->boolean('incluirme')
+            || in_array($request->input('para_quien', 'mi'), ['mi', 'mi_y_otros']);
+
+        if (($user->isAdmin() || $user->isSuperadmin()) && $incluyeCreador) {
+            if (empty($user->planta_id)) {
+                throw new \Exception(
+                    'Su usuario no tiene planta asignada, no puede crear solicitudes que lo incluyan. ' .
+                    'Use "Solo para otras personas" y seleccione la planta correspondiente.'
+                );
+            }
+            if ((int) $plantaOrigenId !== (int) $user->planta_id) {
+                throw new \Exception(
+                    'Cuando la solicitud lo incluye a usted (solo para mí / para mí y otros), la planta origen ' .
+                    'debe ser su planta asignada (' . $user->planta_nombre . '). ' .
+                    'Para tramitar personas de otra planta, use "Solo para otras personas".'
+                );
+            }
+        }
+
         // Planta destino
-        if ($tipo === 'pase_salida') {
+        // V10.3 · CAMBIO #13: permiso_entrada se comporta como pase_salida:
+        // destino = origen (autoriza entrar a SU propia planta fuera de
+        // turno). Ir a OTRA planta sigue siendo exclusivo de interplantas
+        // (doble aprobación), para que nadie use permiso_entrada como
+        // atajo para colarse en plantas ajenas.
+        if (in_array($tipo, ['pase_salida', 'permiso_entrada'])) {
             // D1-bis: destino = origen (no va a otra planta)
             $plantaDestinoId = $plantaOrigenId;
         } else {
@@ -241,8 +277,12 @@ class SolicitudController extends Controller
             // ¿Es Admin/Super? → puede auto-aprobar el destino también.
             $esSuperior = $user->isAdmin() || $user->isSuperadmin();
 
-            if ($tipo === 'pase_salida') {
-                // Pase de salida: solo requiere aprobación de origen.
+            // V10.3 · CAMBIO #14: permiso_entrada, igual que pase_salida,
+            // solo requiere aprobación de ORIGEN (una sola planta interviene:
+            // la del beneficiario). Aprobador+ que lo crea → queda 'aprobado'.
+            if (in_array($tipo, ['pase_salida', 'permiso_entrada'])) {
+                // Pase de salida / Permiso de entrada: solo requieren
+                // aprobación de origen.
                 $estado = 'aprobado';
             } elseif ($esSuperior) {
                 // Admin/Super + interplantas: aprueba ambos pasos.
@@ -263,12 +303,30 @@ class SolicitudController extends Controller
         $fechaFin = $request->fecha_fin;
 
         if ($tipo === 'pase_salida') {
-            // Recopilar TODOS los empleados involucrados (creador + agregados)
-            $empleadosInput = $request->input('empleados', []);
-            if ($request->boolean('incluirme') && !in_array($userId, $empleadosInput)) {
-                $empleadosInput[] = $userId;
+            // V10.3-fix: la selección server-side de beneficiarios también
+            // controla el cálculo de fechas del Pase de Salida; no confiamos
+            // en el checkbox oculto "incluirme" del navegador.
+            $empleadosInput = array_values(array_unique(array_map('intval', (array) $request->input('empleados', []))));
+            $paraQuien = $request->input('para_quien', 'mi');
+
+            if ($paraQuien === 'mi') {
+                $empleadosIds = [$userId];
+            } elseif ($paraQuien === 'mi_y_otros') {
+                $empleadosIds = array_values(array_unique(array_merge($empleadosInput, [$userId])));
+            } elseif ($paraQuien === 'otros') {
+                $empleadosIds = $empleadosInput;
+            } else {
+                throw new \Exception("Selección de beneficiarios inválida.");
             }
-            $empleadosIds = array_unique(array_merge([$userId], $empleadosInput));
+
+            // Para el cálculo de fechas del pase, solo importa si el creador
+            // es beneficiario real, no el valor manipulable de "incluirme".
+            $incluirme = in_array($userId, $empleadosIds, true);
+
+            // Validar que haya al menos un empleado
+            if (empty($empleadosIds)) {
+                throw new \Exception("Debe agregar al menos un empleado al Pase de Salida.");
+            }
 
             // Validar que todos tengan turno asignado
             $empleadoresConTurno = Empleado::with('turno')->whereIn('id_empleado', $empleadosIds)->get();
@@ -279,61 +337,221 @@ class SolicitudController extends Controller
                 }
             }
 
+            // FIX 6 (Opción 3): si hay empleados sin turno, bloquear.
             if (!empty($sinTurno)) {
-                // Caso 4: alguien sin turno → exigir fechas manuales
-                if (empty($fechaInicio) || empty($fechaFin)) {
-                    $nombres = implode(', ', $sinTurno);
-                    throw new \Exception("Los siguientes empleados no tienen turno asignado en sitec: {$nombres}. Debe capturar la fecha y hora de inicio y fin manualmente.");
-                }
-                // Si enviaron fechas manuales, las usamos tal cual ($fechaInicio y $fechaFin ya están asignados)
-            } else {
-                // Todos tienen turno → cálculo automático
-                // El creador es la referencia para el turno
-                $empleadoCreador = $empleadoresConTurno->firstWhere('id_empleado', $userId);
-                if (!$empleadoCreador) {
-                    $empleadoCreador = $empleadoresConTurno->first();
+                $nombres = implode(', ', $sinTurno);
+                throw new \Exception("Los siguientes empleados no tienen turno asignado en sitec: {$nombres}. No se puede crear un Pase de Salida para empleados sin turno. Contacte a RR.HH. para que les asignen un turno.");
+            }
+
+            // ============================================================
+            // FIX 6: Cálculo de fechas según "¿Para quién es?"
+            // ============================================================
+            if ($incluirme) {
+                // "Para mí" o "Para mí y otros": cálculo automático desde el turno del creador
+                $empleadoReferencia = $empleadoresConTurno->firstWhere('id_empleado', $userId);
+                if (!$empleadoReferencia) {
+                    $empleadoReferencia = $empleadoresConTurno->first();
                 }
 
-                $turno = $empleadoCreador->turno;
-                $horaSalida = $turno->salida;   // "HH:MM:SS"
-                $horaEntrada = $turno->entrada; // "HH:MM:SS"
+                $turno = $empleadoReferencia->turno;
+                $horaSalida = $turno->salida;
+                $horaEntrada = $turno->entrada;
 
-                // Determinar la fecha base (el request trae fecha_inicio como date o datetime)
                 $fechaBase = \Carbon\Carbon::parse($fechaInicio)->startOfDay();
                 $hoy = now()->startOfDay();
 
                 if ($fechaBase->isSameDay($hoy)) {
-                    // Caso 1: HOY → inicio = ahora, fin = hoy + hora salida
-                    $fechaInicio = now();
-                    $fechaFin = $hoy->copy()->setTimeFromTimeString($horaSalida);
+                    // HOY → inicio = la hora que el usuario capturó en el input.
+                    $fechaInicio = \Carbon\Carbon::parse($request->fecha_inicio);
+                    
+                    // FIX 6: Calcular fecha_fin considerando turnos nocturnos.
+                    // Si el turno cruza medianoche (entrada > salida, ej: 21:30-06:00),
+                    // y la hora actual es antes de medianoche (ej: 10pm), la fecha_fin
+                    // es MAÑANA a la hora de salida. Si es después de medianoche (ej: 2am),
+                    // la fecha_fin es HOY a la hora de salida.
+                    $entradaTs = strtotime($horaEntrada);
+                    $salidaTs = strtotime($horaSalida);
+                    $esTurnoNocturno = $entradaTs > $salidaTs;
+                    
+                    if ($esTurnoNocturno) {
+                        $horaActual = now();
+                        $horaSalidaCarbon = $hoy->copy()->setTimeFromTimeString($horaSalida);
+                        // Si la hora actual es mayor que la hora de salida, significa
+                        // que estamos en la primer parte del turno (antes de medianoche),
+                        // así que la fecha_fin es mañana.
+                        if ($horaActual->format('H:i:s') > $horaSalida) {
+                            $fechaFin = $hoy->copy()->addDay()->setTimeFromTimeString($horaSalida);
+                        } else {
+                            // Estamos después de medianoche, fecha_fin es hoy
+                            $fechaFin = $hoy->copy()->setTimeFromTimeString($horaSalida);
+                        }
+                    } else {
+                        // Turno normal, fecha_fin es hoy
+                        $fechaFin = $hoy->copy()->setTimeFromTimeString($horaSalida);
+                    }
                 } else {
-                    // Caso 2 y 3: FUTURO
+                    // FUTURO (aunque ocultamos "Otra fecha", por defensa)
                     $horaManual = $request->input('hora_inicio_manual');
                     if (!empty($horaManual)) {
-                        // Caso 3: hora de inicio modificada manualmente
                         $fechaInicio = $fechaBase->copy()->setTimeFromTimeString($horaManual);
                     } else {
-                        // Caso 2: inicio = hora de entrada del turno
+                        $fechaInicio = $fechaBase->copy()->setTimeFromTimeString($horaEntrada);
+                    }
+                    $fechaFin = $fechaBase->copy()->setTimeFromTimeString($horaSalida);
+                }
+            } else {
+                // "Solo para otras personas": calcular fechas desde el turno
+                // del primer empleado (igual que cuando es "incluirme", pero
+                // usando el primer empleado de la lista en vez del creador).
+                $empleadoReferencia = $empleadoresConTurno->first();
+                if (!$empleadoReferencia) {
+                    throw new \Exception("No se encontraron empleados válidos para calcular el Pase de Salida.");
+                }
+
+                $turno = $empleadoReferencia->turno;
+                $horaSalida = $turno->salida;
+                $horaEntrada = $turno->entrada;
+
+                $fechaBase = \Carbon\Carbon::parse($fechaInicio)->startOfDay();
+                $hoy = now()->startOfDay();
+
+                if ($fechaBase->isSameDay($hoy)) {
+                    // HOY → inicio = la hora que el usuario capturó
+                    $fechaInicio = \Carbon\Carbon::parse($request->fecha_inicio);
+
+                    // Calcular fecha_fin considerando turnos nocturnos
+                    $entradaTs = strtotime($horaEntrada);
+                    $salidaTs = strtotime($horaSalida);
+                    $esTurnoNocturno = $entradaTs > $salidaTs;
+
+                    if ($esTurnoNocturno) {
+                        $horaActual = now();
+                        $horaSalidaCarbon = $hoy->copy()->setTimeFromTimeString($horaSalida);
+                        if ($horaActual->format('H:i:s') > $horaSalida) {
+                            $fechaFin = $hoy->copy()->addDay()->setTimeFromTimeString($horaSalida);
+                        } else {
+                            $fechaFin = $hoy->copy()->setTimeFromTimeString($horaSalida);
+                        }
+                    } else {
+                        $fechaFin = $hoy->copy()->setTimeFromTimeString($horaSalida);
+                    }
+                } else {
+                    // FUTURO
+                    $horaManual = $request->input('hora_inicio_manual');
+                    if (!empty($horaManual)) {
+                        $fechaInicio = $fechaBase->copy()->setTimeFromTimeString($horaManual);
+                    } else {
                         $fechaInicio = $fechaBase->copy()->setTimeFromTimeString($horaEntrada);
                     }
                     $fechaFin = $fechaBase->copy()->setTimeFromTimeString($horaSalida);
                 }
             }
-        }
+        } // ← esta llave cierra el if ($tipo === 'pase_salida') de la línea 265
 
         // ============================================================
         // FIX A-3: VALIDACIÓN DE DÍA LABORAL, INTERSECCIÓN Y "ESTÁ EN PLANTA"
         // ============================================================
-        if (in_array($tipo, ['pase_salida', 'interplantas'])) {
-            $empleadosIds = [$userId];
-            $empleadosInput = $request->input('empleados', []);
-            if ($request->boolean('incluirme') && !in_array($userId, $empleadosInput)) {
-                $empleadosInput[] = $userId;
+        // V10.3 · CAMBIO #16: permiso_entrada TAMBIÉN pasa por la validación
+        // de existencia/actividad de empleados (FIX #12), pero NO por la
+        // restricción de día laboral: entrar fuera de día/horario es justo
+        // su razón de ser (domingos de operativos, fines de semana de
+        // administrativos, antes/después de turno).
+        if (in_array($tipo, ['pase_salida', 'interplantas', 'permiso_entrada'])) {
+            // V10.3-fix: lista canónica de beneficiarios.
+            // La selección "para_quien" manda en servidor; no confiamos en
+            // campos ocultos/JS manipulables. Esta misma lista se usa para
+            // validar, anti-traslape e insertar solicitud_empleados, evitando
+            // que una parte del flujo considere beneficiarios distintos a otra.
+            $empleadosInput = array_values(array_unique(array_map('intval', (array) $request->input('empleados', []))));
+            $paraQuien = $request->input('para_quien', 'mi');
+
+            if ($paraQuien === 'mi') {
+                // Solo para mí: jamás aceptar beneficiarios ajenos aunque el
+                // cliente haya manipulado el POST.
+                $empleadosIds = [$userId];
+            } elseif ($paraQuien === 'mi_y_otros') {
+                $empleadosIds = $empleadosInput;
+                $empleadosIds[] = $userId;
+            } elseif ($paraQuien === 'otros') {
+                $empleadosIds = $empleadosInput;
+            } else {
+                throw new \Exception('Selección de beneficiarios inválida.');
             }
-            $empleadosIds = array_unique(array_merge($empleadosIds, $empleadosInput));
+
+            $empleadosIds = array_values(array_unique(array_map('intval', $empleadosIds)));
+
+            if (empty($empleadosIds)) {
+                throw new \Exception('Debe seleccionar al menos un empleado beneficiario.');
+            }
 
             $empleadosAValidar = Empleado::with(['turno', 'clasificacion'])->whereIn('id_empleado', $empleadosIds)->get();
-            $fechaBase = \Carbon\Carbon::parse($fechaInicio)->startOfDay();
+
+        // FIX #12: validar que TODOS los empleados solicitados existen y están activos.
+        // Antes: si se pedían [1001, 9999] y 9999 no existía, se ignoraba silenciosamente.
+        // Ahora: lanzamos excepción con los IDs faltantes o inactivos.
+        $idsSolicitados = collect($empleadosIds)->map(fn ($id) => (int) $id)->unique()->values();
+        $idsEncontrados = $empleadosAValidar->pluck('id_empleado')->map(fn ($id) => (int) $id)->values();
+        $idsNoEncontrados = $idsSolicitados->diff($idsEncontrados);
+        if ($idsNoEncontrados->isNotEmpty()) {
+            throw new \Exception('Uno o más empleados seleccionados ya no existen en SITEC.');
+        }
+        $empleadosInactivos = $empleadosAValidar->filter(fn ($emp) => !$emp->estaActivo());
+        if ($empleadosInactivos->isNotEmpty()) {
+            $nombres = $empleadosInactivos->pluck('nombre_completo')->implode(', ');
+            throw new \Exception("Los siguientes empleados ya no están activos en SITEC: {$nombres}.");
+        }
+
+        // ============================================================
+        // V10.3.7-fix: QUIEN NO NECESITA EL PERMISO NO PUEDE SER
+        // BENEFICIARIO — y el creador es un beneficiario más (llega en
+        // $empleadosAValidar cuando para_quien = mi / mi_y_otros).
+        //
+        // Confirmado con el usuario (regla única, aplica a cualquier rol):
+        //   - Pase de Salida → solo lo necesita un OPERATIVO. Corporativos
+        //     y administrativos salen de su planta libremente durante su
+        //     turno: el escáner jamás consulta un pase para ellos, así que
+        //     sería un "permiso muerto" (misma clase de bug que V10.3.3).
+        //   - Permiso de Entrada / Interplantas → no los necesita un
+        //     CORPORATIVO (RN-01: entra a cualquier planta a cualquier hora).
+        //   - Sin clasificar → el escáner lo rechaza SIEMPRE
+        //     (sin_clasificar, validarAccesoPlanta caso 1): cualquier
+        //     permiso interno es papel mojado; debe ir a RR.HH.
+        //
+        // La UI ya bloquea estos casos (create.blade, mismo marcador);
+        // esta es la defensa autoritativa ante POST artesanales.
+        // ============================================================
+        $noNecesitan = [];
+        foreach ($empleadosAValidar as $emp) {
+            $tipoEmpBeneficiario = $emp->tipoEmpleado();
+            if ($tipo === 'pase_salida') {
+                if ($tipoEmpBeneficiario !== 'operativo') {
+                    $noNecesitan[] = $emp->nombre_completo
+                        . ($tipoEmpBeneficiario ? " ({$tipoEmpBeneficiario})" : ' (sin clasificar en RR.HH.)');
+                }
+            } elseif ($tipoEmpBeneficiario === 'corporativo' || $tipoEmpBeneficiario === null) {
+                $noNecesitan[] = $emp->nombre_completo
+                    . ($tipoEmpBeneficiario === 'corporativo' ? ' (corporativo)' : ' (sin clasificar en RR.HH.)');
+            }
+        }
+        if (!empty($noNecesitan)) {
+            $lista = implode(', ', $noNecesitan);
+            if ($tipo === 'pase_salida') {
+                throw new \Exception(
+                    "No se puede crear el Pase de Salida: {$lista}. " .
+                    'Corporativos y administrativos no necesitan pase para salir (pueden salir de su planta libremente ' .
+                    'durante su turno) y un empleado sin clasificar es rechazado siempre por el escáner. ' .
+                    'Solo los operativos requieren Pase de Salida. Si cree que la clasificación es incorrecta, acuda a RR.HH.'
+                );
+            }
+            $nombrePermiso = $tipo === 'interplantas' ? 'Interplantas' : 'Permiso de Entrada';
+            throw new \Exception(
+                "No se puede crear el {$nombrePermiso}: {$lista}. " .
+                'Un corporativo entra libremente a cualquier planta a cualquier hora (no necesita permiso) ' .
+                'y un empleado sin clasificar es rechazado siempre por el escáner (debe acudir a RR.HH.).'
+            );
+        }
+
+        $fechaBase = \Carbon\Carbon::parse($fechaInicio)->startOfDay();
             $esHoy = $fechaBase->isSameDay(now()->startOfDay());
             $diaSemana = $fechaBase->dayOfWeekIso; // 1=Lun, 7=Dom
 
@@ -348,11 +566,10 @@ class SolicitudController extends Controller
                 if (!$esDiaLaboral) {
                     if ($tipo === 'pase_salida') {
                         // Excepción: HOY + está en planta
-                        $ultimaBitacora = \App\Models\Bitacora::where('persona_id', (string) $emp->id_empleado)
-                            ->whereDate('fecha_hora', today())
-                            ->whereNotIn('estado_evento', ['denegado'])
-                            ->latest('fecha_hora')->first();
-                        $estaEnPlanta = $ultimaBitacora && $ultimaBitacora->tipo_evento === 'entrada';
+                        $estaEnPlanta = \App\Services\PresenciaService::estaDentro(
+                            (string) $emp->id_empleado,
+                            (int) $emp->plantaId()
+                        );
 
                         if ($esHoy && $estaEnPlanta) {
                             // Permite crear, pero no hacemos nada (el guardia justificará al salir)
@@ -360,11 +577,145 @@ class SolicitudController extends Controller
                             $nombresDias = [1=>'Lunes',2=>'Martes',3=>'Miércoles',4=>'Jueves',5=>'Viernes',6=>'Sábado',7=>'Domingo'];
                             throw new \Exception("No es posible crear el Pase de Salida para {$emp->nombre_completo} porque {$nombresDias[$diaSemana]} no es día laboral.");
                         }
-                    } else {
+                    } elseif ($tipo === 'interplantas') {
                         // Interplantas: advertir pero permitir
                         LogSistema::registrar('WARN_INTERPLANTAS_DIA', "Solicitud INT para {$emp->nombre_completo} en día no laboral. Se permite con advertencia.");
                     }
+                    // V10.3 · CAMBIO #16 (FIX A-3 ajustado): si el tipo es
+                    // permiso_entrada y el día no es laboral, NO se bloquea
+                    // ni se advierte: es su caso de uso natural. Así se
+                    // pueden crear permisos de entrada para domingo (regla
+                    // acordada en el plan D-2).
                 }
+            }
+        }
+
+        // ============================================================
+        // V10.3.3-fix (bug 1 reportado por el usuario): un Permiso de
+        // Entrada solo tiene efecto FUERA del turno del beneficiario.
+        // El escáner (AccesoService) lo consulta ÚNICAMENTE en:
+        //   1) día no laboral (domingo operativo / fin de semana admin),
+        //   2) empleado sin turno asignado,
+        //   3) primera entrada MÁS de 30 min antes del turno, o
+        //   4) entrada después de que termina el turno (salidaMax).
+        // Una vigencia que queda COMPLETAMENTE dentro del turno es un
+        // permiso que jamás se consulta (p. ej. el fin prellenado con la
+        // hora de SALIDA del turno del creador, que era el bug reportado).
+        // Se bloquea explicando la regla; el solape PARCIAL (p. ej.
+        // 04:00-12:00 con turno 06:00-14:00) se permite porque la parte
+        // fuera del turno sí es consultada y la de dentro es inofensiva.
+        // ============================================================
+        if ($tipo === 'permiso_entrada') {
+            $inicioPermiso = \Carbon\Carbon::parse($fechaInicio);
+            $finPermiso    = \Carbon\Carbon::parse($fechaFin);
+            $ventanaDentroTurno = [];
+
+            foreach ($empleadosAValidar as $emp) {
+                // Sin turno → SIEMPRE está "fuera de turno": no se valida.
+                if (!$emp->turno || !$emp->turno->entrada || !$emp->turno->salida) {
+                    continue;
+                }
+
+                // Día no laboral del beneficiario → todo el día cuenta como
+                // fuera de turno: el permiso es válido aunque cubra esas horas.
+                $tipoEmp  = $emp->tipoEmpleado();
+                $diaPermiso = $inicioPermiso->copy()->startOfDay()->dayOfWeekIso; // 1=Lun...7=Dom
+                $laboral   = ($tipoEmp === 'administrativo') ? ($diaPermiso <= 5) : ($diaPermiso <= 6);
+                if (!$laboral) {
+                    continue;
+                }
+
+                // Intervalo del turno que podría contener la vigencia.
+                $base = $inicioPermiso->copy()->startOfDay();
+                $contiene = false;
+                if ($emp->turno->entrada > $emp->turno->salida) {
+                    // Turno nocturno (cruza medianoche): el permiso puede caer
+                    // en el turno de la noche anterior o en el de la propia noche.
+                    $iniA = $base->copy()->subDay()->setTimeFromTimeString($emp->turno->entrada);
+                    $finA = $base->copy()->setTimeFromTimeString($emp->turno->salida);
+                    $iniB = $base->copy()->setTimeFromTimeString($emp->turno->entrada);
+                    $finB = $base->copy()->addDay()->setTimeFromTimeString($emp->turno->salida);
+                    $contiene = ($inicioPermiso->gte($iniA) && $finPermiso->lte($finA))
+                             || ($inicioPermiso->gte($iniB) && $finPermiso->lte($finB));
+                } else {
+                    $iniT = $base->copy()->setTimeFromTimeString($emp->turno->entrada);
+                    $finT = $base->copy()->setTimeFromTimeString($emp->turno->salida);
+                    $contiene = ($inicioPermiso->gte($iniT) && $finPermiso->lte($finT));
+                }
+
+                if ($contiene) {
+                    $ventanaDentroTurno[] = $emp->nombre_completo
+                        . ' (turno ' . substr($emp->turno->entrada, 0, 5) . '-' . substr($emp->turno->salida, 0, 5) . ')';
+                }
+            }
+
+            if (!empty($ventanaDentroTurno)) {
+                $nombresDentro = implode(', ', $ventanaDentroTurno);
+                throw new \Exception(
+                    "La vigencia del Permiso de Entrada ({$inicioPermiso->format('d/m/Y H:i')} a {$finPermiso->format('d/m/Y H:i')}) " .
+                    "queda completamente DENTRO del turno de: {$nombresDentro}. " .
+                    'Un Permiso de Entrada solo tiene efecto FUERA del turno: llegada temprana (antes de su hora de entrada), ' .
+                    'entradas después de que termina su turno, o días no laborales. ' .
+                    'Para una llegada temprana, termine la vigencia a más tardar a la hora de entrada del turno.'
+                );
+            }
+        }
+
+        // ============================================================
+        // V10.3 · CAMBIO #17: ANTI-TRASLAPE INTERNO (regla "1 permiso
+        // activo por empleado")
+        // ============================================================
+        // Un interno NO puede figurar en 2 solicitudes_int con vigencias
+        // traslapadas — ni como creador-individual ni como integrante —
+        // SIN IMPORTAR EL TIPO (pase_salida, interplantas o
+        // permiso_entrada). Esto evita ambigüedades en el escáner (¿qué
+        // permiso aplica?) y refleja la regla de negocio acordada.
+        //
+        // Estados que BLOQUEAN (aún vigentes):
+        //   - Solicitud: pendiente_origen, pendiente_destino, aprobado,
+        //     aprobado_parcial (se liberan con rechazado/expirado).
+        //   - Integrante (solicitud_empleados): pendiente, aprobado,
+        //     aprobado_origen.
+        //
+        // Fórmula de traslape (la MISMA que usa la validación de
+        // externos, líneas arriba):
+        //   nueva.inicio < existente.fin AND nueva.fin > existente.inicio
+        //
+        // Los EXTERNOS NO cambían: pueden tener 2 permisos simultáneos
+        // en plantas DISTINTAS (su validación ya existe y solo bloquea
+        // la misma planta).
+        // ============================================================
+        $nuevaInicioTraslap = \Carbon\Carbon::parse($fechaInicio);
+        $nuevaFinTraslap    = \Carbon\Carbon::parse($fechaFin);
+
+        foreach ($empleadosAValidar as $empTraslap) {
+            $empIdTraslap = $empTraslap->id_empleado;
+            $conflicto = SolicitudInt::query()
+                ->whereIn('estado', ['pendiente_origen', 'pendiente_destino', 'aprobado', 'aprobado_parcial'])
+                ->where('fecha_inicio', '<', $nuevaFinTraslap)
+                ->where('fecha_fin', '>', $nuevaInicioTraslap)
+                ->where(function ($q) use ($empIdTraslap) {
+                    // Mismo criterio del CAMBIO #02 (AccesoService):
+                    // individual (creador sin lista) o integrante activo.
+                    $q->where(function ($qIndividual) use ($empIdTraslap) {
+                        $qIndividual->where('creador_empleado_id', $empIdTraslap)
+                                    ->whereDoesntHave('empleados');
+                    })->orWhereHas('empleados', function ($q2) use ($empIdTraslap) {
+                        $q2->where('empleado_id', $empIdTraslap)
+                           ->whereIn('estado', ['pendiente', 'aprobado', 'aprobado_origen']);
+                    });
+                })
+                ->orderBy('fecha_fin', 'asc')
+                ->first();
+
+            if ($conflicto) {
+                $tiposLabel = [
+                    'pase_salida'     => 'Pase de Salida',
+                    'interplantas'    => 'Interplantas',
+                    'permiso_entrada' => 'Permiso de Entrada',
+                ];
+                $tipoConflicto = $tiposLabel[$conflicto->tipo] ?? $conflicto->tipo;
+                throw new \Exception("{$empTraslap->nombre_completo} ya tiene un permiso interno activo ({$tipoConflicto} #INT-{$conflicto->id_solicitud_int}, vigente del {$conflicto->fecha_inicio->format('d/m/Y H:i')} al {$conflicto->fecha_fin->format('d/m/Y H:i')}) que se traslapa con las fechas de esta solicitud. Regla anti-traslape: un empleado solo puede tener un permiso interno activo a la vez. Espere a que expire o cancele el permiso anterior.");
             }
         }
 
@@ -384,22 +735,10 @@ class SolicitudController extends Controller
             'fecha_aprobacion_destino'        => $fechaAprobDestino,
         ]);
 
-        // N+ empleados (interplantas o pase_salida grupal)
-        $empleados = $request->input('empleados', []);
-
-        // FIX A-6: El campo 'incluirme' ahora es controlado por el selector
-        // "para_quien" en el form. Si es 'mi' o 'mi_y_otros', el JS envía
-        // incluirme=1 automáticamente. Si es 'otros', envía 0.
-        if ($request->boolean('incluirme')) {
-            $empleados[] = $userId;
-        }
-
-        // Si es "solo para mí" (no hay empleados agregados ni incluirme),
-        // aseguramos que el creador quede como único solicitante
-        $paraQuien = $request->input('para_quien', 'mi');
-        if ($paraQuien === 'mi' && empty($empleados)) {
-            $empleados = [$userId];
-        }
+        // V10.3-fix: usar exactamente la lista canónica de beneficiarios
+        // calculada y validada arriba. Así no existe una segunda interpretación
+        // de "para_quien" al momento de insertar solicitud_empleados.
+        $empleados = $empleadosIds;
 
         // Validar que todos los empleados sean de la misma planta origen
         // FIX A-7: Castear $plantaOrigenId a int para que la comparación con
@@ -444,6 +783,39 @@ class SolicitudController extends Controller
         DB::commit();
         LogSistema::registrar('CREAR_SOLICITUD', "Solicitud INT #{$solicitud->id_solicitud_int} tipo={$tipo} estado={$estado}");
 
+        // ============================================================
+        // V10.3 · CAMBIO #18: AVISO A LOS BENEFICIARIOS
+        // ============================================================
+        // Cuando la solicitud incluye a otras personas ("mi_y_otros" u
+        // "otros"), cada beneficiario recibe una notificación in-app
+        // informando que se creó un permiso A SU NOMBRE (transparencia:
+        // nadie debe enterarse en el kiosko de que tiene —o perdió— un
+        // permiso). Solo llega quienes tienen cuenta en ScaQR.
+        // Defensivo: si falla, no rompe la creación.
+        // ============================================================
+        try {
+            $beneficiariosAviso = $solicitud->empleados()
+                ->where('empleado_id', '!=', $userId)
+                ->pluck('empleado_id');
+
+            foreach ($beneficiariosAviso as $benId) {
+                $usuarioBen = \App\Models\UsuarioSca::where('username', (string) $benId)
+                    ->whereNull('fecha_baja')
+                    ->first();
+                if ($usuarioBen) {
+                    \App\Services\NotificacionService::enviar(
+                        $usuarioBen->id_usuario_sca,
+                        'solicitud_beneficiario',
+                        'Permiso creado a su nombre',
+                        "{$user->nombre_completo} creó la solicitud #INT-{$solicitud->id_solicitud_int} que lo incluye como beneficiario. Vigencia: {$solicitud->fecha_inicio->format('d/m/Y H:i')} a {$solicitud->fecha_fin->format('d/m/Y H:i')}.",
+                        route('solicitudes.show.int', $solicitud->id_solicitud_int)
+                    );
+                }
+            }
+        } catch (\Exception $e) {
+            LogSistema::registrar('ERROR_NOTIF', 'Error al notificar beneficiarios: ' . $e->getMessage());
+        }
+
         // Notificaciones (defensivo: si fallan, no rompen la creación)
         try {
             if ($estado === 'aprobado' && $esAprobadorOSuperior) {
@@ -456,31 +828,60 @@ class SolicitudController extends Controller
         }
 
         // ============================================================
-        // CAMBIO V7: Enviar correo a aprobadores/admin/super al crear
+        // CAMBIO V7 → V10.3.5-fix: Enviar correo al crear solicitud INT.
+        // ANTES: se enviaba a TODOS los Aprobador/Admin/Super del sistema
+        // (aprobadores de plantas ajenas incluidos) y con el mismo texto
+        // "requiere su revisión" aunque estuviera auto-aprobada.
+        // AHORA:
+        //   · Pendiente (creador Empleado) → solo aprobadores de la planta
+        //     responsable de aprobar (origen si pendiente_origen; destino
+        //     en el resto) + Admin/Superadmin.
+        //   · Auto-aprobada (creador Aprobador+) → aprobadores de las
+        //     plantas involucradas + Admin/Super (sin el creador), con
+        //     texto de auto-aprobación.
         // ============================================================
         try {
-            $aprobadores = \App\Models\UsuarioSca::whereHas('rol', fn($q) => 
-                $q->whereIn('nombre', ['Aprobador', 'Admin', 'Superadmin'])
-            )->whereNull('fecha_baja')->get();
-
             $creadorNombre = $user->nombre_completo;
             $empleadosIds = $solicitud->empleados->map(fn($se) => $se->empleado_id)->toArray();
             $nombresEmpleados = \App\Models\Sitec\Empleado::whereIn('id_empleado', $empleadosIds)->pluck('nombre_completo')->toArray();
 
-            foreach ($aprobadores as $aprobador) {
-                if ($aprobador->email_emp) {
-                    \Mail::to($aprobador->email_emp)->send(new \App\Mail\NotificacionSolicitudMail(
-                        $solicitud,
-                        $aprobador->nombre_completo,
-                        'Nueva solicitud creada - #' . $solicitud->id_solicitud_int,
-                        '🔔 Nueva Solicitud Pendiente',
-                        'Se ha creado una nueva solicitud que requiere su revisión.',
-                        null,
-                        null, // aprobados
-                        null, // rechazados
-                        $nombresEmpleados, // personas (neutral)
-                        $creadorNombre
-                    ));
+            if ($estado === 'aprobado' && $esAprobadorOSuperior) {
+                // --- V10.3.5-fix: auto-aprobada al crearla ---
+                $destinatarios = \App\Services\NotificacionService::destinatariosCorreoAutoAprobada($solicitud, $user);
+                foreach ($destinatarios as $dest) {
+                    if ($dest->email_emp) {
+                        \Mail::to($dest->email_emp)->send(new \App\Mail\NotificacionSolicitudMail(
+                            $solicitud,
+                            $dest->nombre_completo,
+                            'Solicitud auto-aprobada - #' . $solicitud->id_solicitud_int,
+                            '✅ Solicitud Auto-Aprobada',
+                            "{$creadorNombre} ha generado y aprobado esta solicitud. No requiere revisión adicional.",
+                            null,
+                            null, // aprobados
+                            null, // rechazados
+                            $nombresEmpleados, // personas (neutral)
+                            $creadorNombre
+                        ));
+                    }
+                }
+            } else {
+                // --- V10.3.5-fix: pendiente → planta responsable + Admin/Super ---
+                $destinatarios = \App\Services\NotificacionService::destinatariosCorreoNuevaPendiente($solicitud);
+                foreach ($destinatarios as $dest) {
+                    if ($dest->email_emp) {
+                        \Mail::to($dest->email_emp)->send(new \App\Mail\NotificacionSolicitudMail(
+                            $solicitud,
+                            $dest->nombre_completo,
+                            'Nueva solicitud creada - #' . $solicitud->id_solicitud_int,
+                            '🔔 Nueva Solicitud Pendiente',
+                            'Se ha creado una nueva solicitud que requiere su revisión.',
+                            null,
+                            null, // aprobados
+                            null, // rechazados
+                            $nombresEmpleados, // personas (neutral)
+                            $creadorNombre
+                        ));
+                    }
                 }
             }
         } catch (\Exception $e) {
@@ -488,9 +889,16 @@ class SolicitudController extends Controller
         }
 
         // M2 [ScaModal] — Mensaje detallado de creación.
+        // V10.3 · CAMBIO #20: etiqueta correcta para el nuevo tipo en el
+        // modal de confirmación.
+        $tipoLabelInt = match($solicitud->tipo) {
+            'pase_salida'     => 'Pase de salida',
+            'permiso_entrada' => 'Permiso de entrada',
+            default           => 'Interplantas',
+        };
         $mensaje = "<div class='text-start'>";
         $mensaje .= "<div class='mb-2'><strong>Solicitud creada:</strong> #INT-{$solicitud->id_solicitud_int}</div>";
-        $mensaje .= "<div class='mb-2'><strong>Tipo:</strong> " . ($solicitud->tipo === 'pase_salida' ? 'Pase de salida' : 'Interplantas') . "</div>";
+        $mensaje .= "<div class='mb-2'><strong>Tipo:</strong> " . $tipoLabelInt . "</div>";
         $mensaje .= "<div class='alert alert-info mt-2 mb-0 py-2'><i class='bi bi-info-circle-fill'></i> La solicitud fue enviada a aprobación. Recibirás una notificación cuando sea procesada.</div>";
         $mensaje .= "</div>";
 
@@ -666,30 +1074,54 @@ class SolicitudController extends Controller
         }
 
         // ============================================================
-        // CAMBIO V7: Enviar correo a aprobadores/admin/super al crear
+        // CAMBIO V7 → V10.3.5-fix: Enviar correo al crear solicitud EXT.
+        // Mismo fix de alcance que el flujo INT: antes llegaba a TODOS
+        // los aprobadores del sistema; ahora solo a los de la planta
+        // destino (la responsable de aprobar la entrada del externo) +
+        // Admin/Superadmin, o a las plantas involucradas si quedó
+        // auto-aprobada (creador Aprobador+), sin el creador.
         // ============================================================
         try {
-            $aprobadores = \App\Models\UsuarioSca::whereHas('rol', fn($q) => 
-                $q->whereIn('nombre', ['Aprobador', 'Admin', 'Superadmin'])
-            )->whereNull('fecha_baja')->get();
-
             $creadorNombre = $user->nombre_completo;
             $nombresExternos = $solicitud->externos->map(fn($d) => $d->externo?->nombre_completo ?? 'N/A')->toArray();
 
-            foreach ($aprobadores as $aprobador) {
-                if ($aprobador->email_emp) {
-                    \Mail::to($aprobador->email_emp)->send(new \App\Mail\NotificacionSolicitudMail(
-                        $solicitud,
-                        $aprobador->nombre_completo,
-                        'Nueva solicitud creada - #' . $solicitud->id_solicitud_ext,
-                        '🔔 Nueva Solicitud Pendiente',
-                        'Se ha creado una nueva solicitud que requiere su revisión.',
-                        null,
-                        null, // aprobados
-                        null, // rechazados
-                        $nombresExternos, // personas (neutral)
-                        $creadorNombre
-                    ));
+            if ($estado === 'aprobado' && $esAprobadorOSuperior) {
+                // --- V10.3.5-fix: auto-aprobada al crearla ---
+                $destinatarios = \App\Services\NotificacionService::destinatariosCorreoAutoAprobada($solicitud, $user);
+                foreach ($destinatarios as $dest) {
+                    if ($dest->email_emp) {
+                        \Mail::to($dest->email_emp)->send(new \App\Mail\NotificacionSolicitudMail(
+                            $solicitud,
+                            $dest->nombre_completo,
+                            'Solicitud auto-aprobada - #' . $solicitud->id_solicitud_ext,
+                            '✅ Solicitud Auto-Aprobada',
+                            "{$creadorNombre} ha generado y aprobado esta solicitud. No requiere revisión adicional.",
+                            null,
+                            null, // aprobados
+                            null, // rechazados
+                            $nombresExternos, // personas (neutral)
+                            $creadorNombre
+                        ));
+                    }
+                }
+            } else {
+                // --- V10.3.5-fix: pendiente → planta destino + Admin/Super ---
+                $destinatarios = \App\Services\NotificacionService::destinatariosCorreoNuevaPendiente($solicitud);
+                foreach ($destinatarios as $dest) {
+                    if ($dest->email_emp) {
+                        \Mail::to($dest->email_emp)->send(new \App\Mail\NotificacionSolicitudMail(
+                            $solicitud,
+                            $dest->nombre_completo,
+                            'Nueva solicitud creada - #' . $solicitud->id_solicitud_ext,
+                            '🔔 Nueva Solicitud Pendiente',
+                            'Se ha creado una nueva solicitud que requiere su revisión.',
+                            null,
+                            null, // aprobados
+                            null, // rechazados
+                            $nombresExternos, // personas (neutral)
+                            $creadorNombre
+                        ));
+                    }
                 }
             }
         } catch (\Exception $e) {
@@ -907,10 +1339,22 @@ class SolicitudController extends Controller
      *
      * CAMBIO V7: guarda el motivo y envía correo al creador.
      */
-    public function cancelEmpleadoInt(SolicitudInt $solicitud, Request $request)
-    {
-        $user = $request->user();
-        $request->validate([
+public function cancelEmpleadoInt(SolicitudInt $solicitud, Request $request)
+{
+    $user = $request->user();
+
+    // FIX #13: validar permisos antes de cancelar.
+    $esSuperior = $user->isAdmin() || $user->isSuperadmin();
+    $esCreador = (int) $solicitud->creador_empleado_id === (int) $user->username;
+    $esAprobadorResponsable = $user->isAprobador() && (
+        (int) $solicitud->id_planta_origen === (int) $user->planta_id
+        || (int) $solicitud->id_planta_destino === (int) $user->planta_id
+    );
+    if (!$esSuperior && !$esCreador && !$esAprobadorResponsable) {
+        abort(403, 'No tiene permisos para cancelar empleados de esta solicitud.');
+    }
+
+    $request->validate([
             'empleado_id' => 'required|integer',
             'motivo_cancelacion' => 'required|string|max:500',
         ]);
@@ -1108,6 +1552,16 @@ class SolicitudController extends Controller
     public function cancelExternoIndividual(SolicitudExt $solicitud, Request $request)
     {
         $user = $request->user();
+
+        // FIX #14: validar permisos antes de cancelar.
+        $esSuperior = $user->isAdmin() || $user->isSuperadmin();
+        $esCreador = (int) $solicitud->creador_empleado_id === (int) $user->username;
+        $esAprobadorDestino = $user->isAprobador()
+            && (int) $solicitud->id_planta_destino === (int) $user->planta_id;
+        if (!$esSuperior && !$esCreador && !$esAprobadorDestino) {
+            abort(403, 'No tiene permisos para cancelar personas externas de esta solicitud.');
+        }
+
         $request->validate([
             'id_solicitud_externo_detalle' => 'required|integer',
             'motivo_cancelacion' => 'required|string|max:500',
@@ -1325,7 +1779,7 @@ class SolicitudController extends Controller
 
         // Filtros
         if ($request->filled('tipo')) {
-            if (in_array($request->tipo, ['pase_salida', 'interplantas'])) {
+            if (in_array($request->tipo, ['pase_salida', 'interplantas', 'permiso_entrada'])) {
                 $queryInt->where('tipo', $request->tipo);
                 $queryExt->whereRaw('1=0');
             } else {
@@ -1394,7 +1848,7 @@ class SolicitudController extends Controller
 
         // Filtros
         if ($request->filled('tipo')) {
-            if (in_array($request->tipo, ['pase_salida', 'interplantas'])) {
+            if (in_array($request->tipo, ['pase_salida', 'interplantas', 'permiso_entrada'])) {
                 $queryInt->where('tipo', $request->tipo);
                 $queryExt->whereRaw('1=0');
             } else {
@@ -1438,7 +1892,7 @@ class SolicitudController extends Controller
             ->where('aprobador_destino_empleado_id', $userId);
 
         if ($request->filled('tipo')) {
-            if (in_array($request->tipo, ['pase_salida', 'interplantas'])) {
+            if (in_array($request->tipo, ['pase_salida', 'interplantas', 'permiso_entrada'])) {
                 $queryInt->where('tipo', $request->tipo);
                 $queryExt->whereRaw('1=0');
             } else {
@@ -1549,19 +2003,29 @@ class SolicitudController extends Controller
             $query->whereIn('id_empleado', $idsPlanta);
         }
 
+        // FIX 6: Para Pase de Salida, ocultar empleados sin turno asignado.
+        // El Pase de Salida calcula las fechas automáticamente desde el turno,
+        // así que no puede aplicarse a empleados sin turno.
+        // (Para interplantas y otros tipos, se permiten empleados sin turno
+        //  con confirmación manual.)
+        $tipo = $request->query('tipo');
+        if ($tipo === 'pase_salida') {
+            $query->whereHas('turno', function ($qT) {
+                $qT->whereNotNull('entrada')->whereNotNull('salida');
+            });
+        }
+
         // Cargar candidatos (sin límite, ya filtrados por planta en la BD)
         $candidatos = $query->with(['puesto', 'departamento'])
             ->limit(100) // Límite de seguridad razonable
             ->get();
 
             $resultados = $candidatos->map(function ($e) {
-            // FIX A-3: Verificar si el empleado está actualmente en planta (entrada sin salida hoy)
-            $ultimaBitacora = \App\Models\Bitacora::where('persona_id', (string) $e->id_empleado)
-                ->whereDate('fecha_hora', today())
-                ->whereNotIn('estado_evento', ['denegado'])
-                ->latest('fecha_hora')
-                ->first();
-            $estaEnPlanta = $ultimaBitacora && $ultimaBitacora->tipo_evento === 'entrada';
+
+            $estaEnPlanta = \App\Services\PresenciaService::estaDentro(
+                (string) $e->id_empleado,
+                (int) $e->plantaId()
+            );
 
             return [
                 'id'           => $e->id_empleado,
@@ -1686,15 +2150,31 @@ class SolicitudController extends Controller
         if ($user->isGuardia()) {
             return [];
         }
-        return ['pase_salida', 'interplantas', 'visita', 'contratista'];
+        // V10.3 · CAMBIO #19: se agrega 'permiso_entrada' al catálogo.
+        // Alcances por rol (sin cambios): Empleado → su planta; Aprobador
+        // → su planta (con auto-aprobación); Admin/Super → cualquier planta.
+        return ['pase_salida', 'interplantas', 'permiso_entrada', 'visita', 'contratista'];
     }
 
     public function descargarCredencialPng($idDetalle)
     {
-        $detalle = \App\Models\SolicitudExternoDetalle::with(['solicitudExt', 'externo'])
-            ->findOrFail($idDetalle);
+        // FIX 8: Cargar anfitrión y plantaDestino con eager loading para que la credencial los tenga
+        $detalle = \App\Models\SolicitudExternoDetalle::with([
+            'solicitudExt.plantaDestino', 
+            'solicitudExt.anfitrion.puesto', 
+            'externo',
+        ])->findOrFail($idDetalle);
 
-        if ($detalle->estado_qr !== 'autorizado' || !$detalle->codigo_qr) {
+        // FIX #15: usar el accessor estado_qr_actual (no el crudo) para que
+        // detecte expiración incluso si el cron aún no ha persistido.
+        $solicitud = $detalle->solicitudExt;
+        if (!$solicitud) {
+            return back()->withErrors(['error' => 'La solicitud asociada no existe.']);
+        }
+        if (!in_array($solicitud->estado_actual, ['aprobado', 'aprobado_parcial'], true)) {
+            return back()->withErrors(['error' => 'La solicitud no tiene una autorización vigente.']);
+        }
+        if ($detalle->estado_qr_actual !== 'autorizado' || !$detalle->codigo_qr) {
             return back()->withErrors(['error' => 'Credencial no autorizada o expirada.']);
         }
 
@@ -1714,15 +2194,19 @@ class SolicitudController extends Controller
     {
         $user = $request->user();
         
+        // FIX #16: un Aprobador solo puede reenviar credenciales de su propia planta.
         $puedeReenviar = ($solicitud->creador_empleado_id === (int) $user->username)
-            || $user->isAprobador() || $user->isAdmin() || $user->isSuperadmin();
+            || $user->isAdmin()
+            || $user->isSuperadmin()
+            || ($user->isAprobador() && (int) $solicitud->id_planta_destino === (int) $user->planta_id);
 
         if (!$puedeReenviar) {
             return back()->withErrors(['error' => 'No tiene permisos para reenviar estas credenciales.']);
         }
 
-        if (!in_array($solicitud->estado, ['aprobado', 'aprobado_parcial'])) {
-            return back()->withErrors(['error' => 'La solicitud no está aprobada.']);
+        // FIX #16: usar estado_actual (accessor) en vez de estado crudo.
+        if (!in_array($solicitud->estado_actual, ['aprobado', 'aprobado_parcial'], true)) {
+            return back()->withErrors(['error' => 'La solicitud no está aprobada o ya expiró.']);
         }
 
         try {
@@ -1772,9 +2256,11 @@ class SolicitudController extends Controller
      * Genera y descarga un PDF con TODAS las credenciales de la solicitud.
      * Ruta: GET /solicitudes/ext/{solicitud}/descargar-credenciales
      */
- public function descargarCredenciales(SolicitudExt $solicitud)
+    public function descargarCredenciales(SolicitudExt $solicitud)
     {
-        $pdfData = \App\Services\CredencialService::generarPdfTodas($solicitud);
+    // FIX 8: Cargar relaciones para que las credenciales tengan anfitrión y planta
+    $solicitud->load(['plantaDestino', 'anfitrion.puesto', 'externos.externo']);
+    $pdfData = \App\Services\CredencialService::generarPdfTodas($solicitud);
         return response($pdfData, 200, [
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="credenciales_' . $solicitud->id_solicitud_ext . '.pdf"',

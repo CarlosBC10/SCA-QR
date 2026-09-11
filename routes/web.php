@@ -122,6 +122,10 @@ Route::middleware(['auth', 'debe_cambiar_password'])->group(function () {
     Route::get('/admin/dashboard', fn () => view('dashboards.admin'))->middleware('role:Superadmin,Admin')->name('admin.dashboard');
     Route::get('/aprobador/dashboard', fn () => view('dashboards.aprobador'))->middleware('role:Superadmin,Admin,Aprobador')->name('aprobador.dashboard');
     Route::get('/empleado/dashboard', fn () => view('dashboards.empleado'))->middleware('role:Superadmin,Admin,Aprobador,Empleado')->name('empleado.dashboard');
+    // Logs del sistema (solo Superadmin)
+    Route::get('/logs', [\App\Http\Controllers\LogController::class, 'index'])
+        ->middleware('role:Superadmin')
+        ->name('logs.index');
 
     // ------------------------------------------------------------
     // Panel del Guardia (dashboard web)
@@ -150,15 +154,24 @@ Route::middleware(['auth', 'debe_cambiar_password'])->group(function () {
         // Resolver revisión F10 (guardia marca todo_bien|anomalia)
         Route::post('/api/guardia/resolve', [ScannerController::class, 'resolverPendiente'])->name('api.guardia.resolve');
 
+        // FIX Cambio 2: Rechazar acceso pendiente (guardia deniega justificación o F10)
+        Route::post('/api/guardia/rechazar', [ScannerController::class, 'rechazarEscaneo'])->name('api.guardia.rechazar');
+
         // Terminar turno (cierra TODOS los kioskos del guardia + logout)
         Route::post('/guardia/terminar-turno', [ScannerController::class, 'terminarTurno'])->name('guardia.terminar.turno');
 
         // API: catálogo de justificaciones de horario (para el dropdown del guardia)
         Route::get('/api/justificaciones', [CatalogoController::class, 'justificaciones'])->name('api.justificaciones');
-        // Resetear contraseña desde el panel de admin
-        Route::post('/usuarios/{usuario}/reset-password', [\App\Http\Controllers\UsuarioController::class, 'resetPassword'])->name('usuarios.reset-password');
+    });
 
-        // M2 [ScaModal] — Cambiar contraseña de guardia directamente (sin correo).
+    // ============================================================
+    // FIX #7: Cambio de contraseñas administrativo
+    // ============================================================
+    // Guardia NO tiene acceso a estas operaciones.
+    // El método del controlador mantiene además el scoping por planta
+    // para Aprobadores.
+    Route::middleware('role:Superadmin,Admin,Aprobador')->group(function () {
+        Route::post('/usuarios/{usuario}/reset-password', [\App\Http\Controllers\UsuarioController::class, 'resetPassword'])->name('usuarios.reset-password');
         Route::post('/usuarios/{usuario}/cambiar-password-guardia', [\App\Http\Controllers\UsuarioController::class, 'cambiarPasswordGuardia'])->name('usuarios.cambiar-password-guardia');
     });
 
@@ -297,4 +310,16 @@ Route::middleware(['auth', 'debe_cambiar_password'])->group(function () {
     Route::get('/api/notificaciones', [NotificacionController::class, 'api'])->name('api.notificaciones');
     Route::post('/api/notificaciones/marcar-leida', [NotificacionController::class, 'marcarLeida'])->name('api.notificaciones.marcar');
     Route::post('/api/notificaciones/marcar-todas', [NotificacionController::class, 'marcarTodasLeidas'])->name('api.notificaciones.marcar-todas');
+
+    // ============================================================
+    // MÓDULO DE BITÁCORA (Historial de Accesos)
+    // ============================================================
+    
+    // FIX Bug 3: Proteger rutas de bitácora para que solo Admin, Superadmin y Aprobador puedan acceder
+    Route::middleware('role:Superadmin,Admin,Aprobador')->group(function () {
+    Route::get('/bitacora', [App\Http\Controllers\BitacoraController::class, 'index'])->name('bitacora.index');
+    Route::get('/bitacora/detalle/{id}', [App\Http\Controllers\BitacoraController::class, 'detalle'])->name('bitacora.detalle');
+    Route::get('/bitacora/buscar-persona', [App\Http\Controllers\BitacoraController::class, 'buscarPersonaAjax'])->name('bitacora.buscar');
+    Route::get('/bitacora/exportar-csv', [App\Http\Controllers\BitacoraController::class, 'exportarCsv'])->name('bitacora.exportar');
+    });
 });

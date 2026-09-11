@@ -61,10 +61,47 @@ class SolicitudExternoDetalle extends Model
      * El comando sca:expirar-solicitudes es el que se encarga de invalidar
      * los QRs de externos que NO están dentro.
      */
+    /**
+     * ACCESSOR: estado real del QR, considerando expiración.
+     *
+     * FIX Bug 7: Este accessor ahora es "puro" (solo cálculo, sin writes).
+     * Antes hacía 1 query SQL a bitácora + 2 saveQuietly() POR EXTERNO,
+     * causando N+1 queries en show_ext.blade.php cuando hay múltiples externos.
+     *
+     * Ahora solo calcula el estado en runtime.
+     * La persistencia la hace el cron ExpirarSolicitudes.
+     *
+     * Nota: Si la solicitud venció pero el externo está dentro de planta,
+     * el QR sigue siendo 'autorizado' (para que pueda salir).
+     */
     public function getEstadoQrActualAttribute(): string
     {
         if (in_array($this->estado_qr, ['cancelado', 'expirado'])) {
             return $this->estado_qr;
+        }
+
+        $solicitud = $this->solicitudExt;
+
+        if ($solicitud && $solicitud->fecha_fin && $solicitud->fecha_fin < now()) {
+            // La solicitud venció. El cron decidirá si invalidar el QR
+            // (verificando si el externo está dentro de planta).
+            // Para fines de display, mostramos 'expirado'.
+            return 'expirado';
+        }
+
+        return $this->estado_qr;
+    }
+
+    /**
+     * FIX Bug 7: Método explícito para persistir la expiración del QR en BD.
+     *
+     * Llamar SOLO desde contextos de escritura (ScannerController).
+     * Verifica si el externo está dentro de planta antes de invalidar.
+     */
+    public function expirarQrSiVencido(): void
+    {
+        if (in_array($this->estado_qr, ['cancelado', 'expirado'])) {
+            return;
         }
 
         $solicitud = $this->solicitudExt;
@@ -91,12 +128,8 @@ class SolicitudExternoDetalle extends Model
                     $solicitud->estado = 'expirado';
                     $solicitud->saveQuietly();
                 }
-                return 'expirado';
             }
-            // Si está dentro → el QR sigue 'autorizado' para que pueda salir.
         }
-
-        return $this->estado_qr;
     }
 
     /**

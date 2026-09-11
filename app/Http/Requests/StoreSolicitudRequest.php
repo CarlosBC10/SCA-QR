@@ -16,6 +16,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreSolicitudRequest extends FormRequest
 {
@@ -59,7 +60,9 @@ class StoreSolicitudRequest extends FormRequest
         $tipo = $this->input('tipo');
 
         $rules = [
-            'tipo'              => ['required', 'in:pase_salida,interplantas,visita,contratista'],
+            // V10.3 · CAMBIO #21: se agrega 'permiso_entrada' al enum
+            // permitido (valor nuevo de solicitudes_int.tipo, Script 2 BD).
+            'tipo'              => ['required', 'in:pase_salida,interplantas,permiso_entrada,visita,contratista'],
             'fecha_inicio'      => ['required', 'date', function ($attribute, $value, $fail) {
                 $inicio = \Carbon\Carbon::parse($value);
                 $ahora = now();
@@ -73,6 +76,7 @@ class StoreSolicitudRequest extends FormRequest
             'empleados'         => ['nullable', 'array'],
             'empleados.*'       => ['integer'],
             'incluirme'         => ['nullable', 'boolean'],
+            'para_quien'        => ['nullable', 'in:mi,mi_y_otros,otros'], // V10.3.2-fix: blindar beneficiarios canónicos
 
             'anfitrion_empleado_id' => ['nullable', 'integer'],
             'empresa'           => ['nullable', 'string', 'max:150'],
@@ -85,18 +89,20 @@ class StoreSolicitudRequest extends FormRequest
         ];
 
         if ($tipo === 'interplantas') {
-            $rules['planta_destino_id'] = ['required', 'integer', 'exists:plantas,id_planta'];
+            $rules['planta_destino_id'] = ['required', 'integer', Rule::exists('plantas', 'id_planta')->where(fn ($query) => $query->where('activa', true))];
         }
 
-        if (in_array($tipo, ['pase_salida', 'interplantas'])) {
+        // V10.3 · CAMBIO #22: permiso_entrada también es interno → los
+        // Admin/Super deben elegir planta origen en el formulario.
+        if (in_array($tipo, ['pase_salida', 'interplantas', 'permiso_entrada'])) {
             if (auth()->user()->isAdmin() || auth()->user()->isSuperadmin()) {
-                $rules['planta_origen_id'] = ['required', 'integer', 'exists:plantas,id_planta'];
+                $rules['planta_origen_id'] = ['required', 'integer', Rule::exists('plantas', 'id_planta')->where(fn ($query) => $query->where('activa', true))];
             }
         }
 
         if (in_array($tipo, ['visita', 'contratista'])) {
             if (auth()->user()->isAdmin() || auth()->user()->isSuperadmin()) {
-                $rules['planta_destino_id'] = ['required', 'integer', 'exists:plantas,id_planta'];
+                $rules['planta_destino_id'] = ['required', 'integer', Rule::exists('plantas', 'id_planta')->where(fn ($query) => $query->where('activa', true))];
             }
             $rules['externos'] = ['required', 'array', 'min:1'];
             $rules['externos.*.nombre'] = ['required', 'string', 'max:200'];
