@@ -641,6 +641,13 @@
             <a href="{{ route('clasificaciones.index') }}" class="nav-link {{ request()->routeIs('clasificaciones.*') ? 'active' : '' }}" title="Clasificación por planta">
                 <span class="nav-icon"><i class="bi bi-diagram-3-fill" aria-hidden="true"></i></span><span class="nav-label">Clasificación por planta</span>
             </a>
+            {{-- MÓDULO DE CONFIGURACIÓN: Admin/Superadmin únicamente (el bloque
+                  "Gestión" también deja entrar a Aprobadores, por eso el if interno). --}}
+            @if(Auth::user()->isSuperadmin() || Auth::user()->isAdmin())
+            <a href="{{ route('configuracion.index') }}" class="nav-link {{ request()->routeIs('configuracion.*') ? 'active' : '' }}" title="Configuración del sistema">
+                <span class="nav-icon"><i class="bi bi-gear-fill" aria-hidden="true"></i></span><span class="nav-label">Configuración</span>
+            </a>
+            @endif
             @endif
 
             @if(Auth::user()->isSuperadmin())

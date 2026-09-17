@@ -62,9 +62,15 @@ class AccesoService
     // ============================================================
     // Estas tolerancias permiten que un empleado llegue un poco antes
     // o después de su hora sin que se marque como anomalía.
-    const TOLERANCIA_ENTRADA_ANTES   = 30 * 60;  // 30 min antes: llegada temprana OK
-    const TOLERANCIA_ENTRADA_DESPUES = 15 * 60;  // 15 min después: llegada tardía leve OK
-    const TOLERANCIA_SALIDA_DESPUES  = 30 * 60;  // 30 min después: salida tardía leve OK
+    // ============================================================
+    // MÓDULO DE CONFIGURACIÓN (antes constantes hardcodeadas):
+    // Las tolerancias de horario (antes TOLERANCIA_ENTRADA_ANTES
+    // /DESPUES y TOLERANCIA_SALIDA_DESPUES) y la probabilidad F10
+    // ahora viven en ConfigSistemaService (tabla BD + cache + UI
+    // en /configuracion). Defaults documentados en su catálogo
+    // DEFECTOS: 30 / 15 / 30 min y 10% (SRS).
+    // Se leen por escaneo vía cache → costo ~cero.
+    // ============================================================
 
     // ============================================================
     // RN-01, RN-02, RN-03: VALIDACIÓN DE ACCESO A PLANTA
@@ -502,9 +508,13 @@ class AccesoService
             }
         }
 
-        $entradaMin = $entradaTs - self::TOLERANCIA_ENTRADA_ANTES;    // ej. 5:30
-        $entradaMax = $entradaTs + self::TOLERANCIA_ENTRADA_DESPUES;  // ej. 6:15
-        $salidaMax  = $salidaTs + self::TOLERANCIA_SALIDA_DESPUES;    // ej. 14:30 (o 06:30+86400 si nocturno)
+        // Tolerancias configurables (módulo /configuracion). Defaults
+        // 30/15/30 min; misma semántica que las constantes que
+        // reemplazan. toleranciasSegundos() ya viene en SEGUNDOS.
+        $tolerancias = ConfigSistemaService::toleranciasSegundos();
+        $entradaMin = $entradaTs - $tolerancias['entrada_antes'];   // ej. 5:30
+        $entradaMax = $entradaTs + $tolerancias['entrada_despues']; // ej. 6:15
+        $salidaMax  = $salidaTs + $tolerancias['salida_despues'];   // ej. 14:30 (o 06:30+86400 si nocturno)
 
         // ============================================================
         // ENTRADA
@@ -1279,13 +1289,11 @@ class AccesoService
             return false;
         }
 
-        // Empleados exentos (ej. directivos que siempre pasan)
-        if (in_array($empleado->id_empleado, config('sca_qr.exentos_revision', []))) {
-            return false;
-        }
-
-        // Sorteo: 10% de probabilidad (configurable)
-        $probabilidad = config('sca_qr.probabilidad_revision', 10);
+        // Sorteo: probabilidad configurable en /configuracion.
+        // Default 10% (SRS F10). Nota: antes este default vivía en
+        // config/sca_qr.php con valor 20 (bug — el doble de lo
+        // documentado); el catálogo nuevo lo corrige.
+        $probabilidad = ConfigSistemaService::obtenerInt('probabilidad_revision');
         return rand(1, 100) <= $probabilidad;
     }
 }

@@ -43,6 +43,7 @@ use App\Models\LogSistema;
 use App\Models\Notificacion;
 use App\Services\AccesoService;
 use App\Services\NotificacionService;
+use App\Services\ConfigSistemaService; // Módulo /configuracion (timeout F10 configurable)
 
 class ScannerController extends Controller
 {
@@ -1697,7 +1698,9 @@ class ScannerController extends Controller
 
         $timeout = max(
             1,
-            (int) config('sca_qr.minutos_timeout_revision', 5)
+            // MÓDULO /configuracion: timeout del pendiente ahora configurable
+            // (default 5 min, catálogo ConfigSistemaService::DEFECTOS).
+            ConfigSistemaService::obtenerInt('minutos_timeout_revision')
         );
 
         $limite = now()->subMinutes($timeout);

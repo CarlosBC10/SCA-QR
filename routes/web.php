@@ -227,6 +227,21 @@ Route::middleware(['auth', 'debe_cambiar_password'])->group(function () {
     });
 
     // ------------------------------------------------------------
+    // MÓDULO DE CONFIGURACIÓN DEL SISTEMA (Fase 1)
+    // ------------------------------------------------------------
+    // Parámetros operativos editables en caliente por Admin/Superadmin:
+    // probabilidad F10, exentos, timeout de pendientes y tolerancias
+    // de horario. Aprobador y Guardia sin acceso (ni menú ni URL).
+    // El controlador agrega validación por sección y el service
+    // (ConfigSistemaService) solo acepta claves de su catálogo.
+    // ------------------------------------------------------------
+    Route::middleware('role:Superadmin,Admin')->group(function () {
+        Route::get('/configuracion', [\App\Http\Controllers\ConfiguracionController::class, 'index'])->name('configuracion.index');
+        Route::post('/configuracion', [\App\Http\Controllers\ConfiguracionController::class, 'update'])->name('configuracion.update');
+        Route::post('/configuracion/restaurar', [\App\Http\Controllers\ConfiguracionController::class, 'restaurar'])->name('configuracion.restaurar');
+    });
+
+    // ------------------------------------------------------------
     // M4 & M5: Solicitudes
     // ------------------------------------------------------------
 
