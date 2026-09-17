@@ -115,6 +115,9 @@
                         <option value="">Todos</option>
                         <option value="autorizado" @selected($estadoActual === 'autorizado')>Autorizado</option>
                         <option value="denegado" @selected($estadoActual === 'denegado')>Denegado</option>
+                        {{-- V10.3.11 (P6): estados intermedios que la BD sí contiene --}}
+                        <option value="pendiente_revision" @selected($estadoActual === 'pendiente_revision')>Pendiente</option>
+                        <option value="revision_horario" @selected($estadoActual === 'revision_horario')>En revisión</option>
                     </select>
                 </div>
 
@@ -127,6 +130,8 @@
                         <option value="">Todas</option>
                         <option value="revision" @selected($incidenciaActual === 'revision')>Revisión</option>
                         <option value="justificacion" @selected($incidenciaActual === 'justificacion')>Justificación</option>
+                        {{-- V10.3.11 (P2): incidencia nueva — solo eventos con hallazgo F10 registrado --}}
+                        <option value="hallazgos" @selected($incidenciaActual === 'hallazgos')>Solo hallazgos F10</option>
                     </select>
                 </div>
 
@@ -146,6 +151,14 @@
                         <option value="salida_tardia" @selected(request('motivo') === 'salida_tardia')>Salida tardía</option>
                         <option value="credencial_expirada" @selected(request('motivo') === 'credencial_expirada')>Credencial expirada</option>
                         <option value="planta_inconsistente" @selected(request('motivo') === 'planta_inconsistente')>Planta inconsistente</option>
+                        {{-- V10.3.11 (P6): motivos que el motor escribe pero faltaban en el dropdown --}}
+                        <option value="empleado_inactivo" @selected(request('motivo') === 'empleado_inactivo')>Empleado inactivo</option>
+                        <option value="manual_bloqueado" @selected(request('motivo') === 'manual_bloqueado')>Manual bloqueado</option>
+                        <option value="pendiente_sin_resolver" @selected(request('motivo') === 'pendiente_sin_resolver')>Pendiente sin resolver</option>
+                        <option value="rechazado_guardia" @selected(request('motivo') === 'rechazado_guardia')>Rechazado por guardia</option>
+                        <option value="cerrado_sin_resolver" @selected(request('motivo') === 'cerrado_sin_resolver')>Cerrado sin resolver</option>
+                        <option value="sin_turno" @selected(request('motivo') === 'sin_turno')>Sin turno</option>
+                        <option value="dia_no_laboral" @selected(request('motivo') === 'dia_no_laboral')>Día no laboral</option>
                     </select>
                 </div>
 
@@ -202,6 +215,52 @@
         </form>
     </div>
 </div>
+
+{{-- V10.3.11 (P7): chips de filtros rápidos — un clic setea los campos y aplica --}}
+<div class="d-flex flex-wrap align-items-center gap-2 mb-4">
+    <span class="small text-muted fw-semibold"><i class="bi bi-lightning-charge me-1 text-warning"></i>Accesos rápidos:</span>
+    <button type="button" class="btn btn-sm btn-outline-secondary" data-chip="hoy">Hoy</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" data-chip="ayer">Ayer</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" data-chip="semana">Últimos 7 días</button>
+    <button type="button" class="btn btn-sm btn-outline-danger" data-chip="denegados"><i class="bi bi-x-octagon me-1"></i>Denegados</button>
+    <button type="button" class="btn btn-sm btn-outline-info" data-chip="pendientes"><i class="bi bi-hourglass-split me-1"></i>Pendientes</button>
+    <button type="button" class="btn btn-sm btn-outline-primary" data-chip="hallazgos"><i class="bi bi-search me-1"></i>Hallazgos F10</button>
+</div>
+
+{{-- V10.3.11 (P5): resumen de uso por persona — solo visible cuando el filtro
+     activo es "Permiso de Entrada" (usa la MISMA consulta ya filtrada) --}}
+@if(isset($usoPermiso) && $usoPermiso !== null && $usoPermiso->isNotEmpty())
+<div class="card border-0 shadow-sm sca-card mb-4">
+    <div class="card-header bg-white border-bottom py-3">
+        <h5 class="mb-0 fw-bold"><i class="bi bi-clipboard-data me-2 text-primary"></i>Uso de Permiso de Entrada por persona</h5>
+        <small class="text-muted">Top {{ $usoPermiso->count() }} · sobre los eventos ya filtrados.</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th class="ps-3">Persona</th>
+                    <th class="text-center">Eventos</th>
+                    <th class="text-center">Entradas</th>
+                    <th class="text-center">Salidas</th>
+                    <th class="pe-3 text-end">Último movimiento</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach($usoPermiso as $u)
+                    <tr>
+                        <td class="ps-3 fw-semibold">{{ $u->persona }}</td>
+                        <td class="text-center">{{ number_format($u->eventos) }}</td>
+                        <td class="text-center text-success fw-semibold">{{ number_format($u->entradas) }}</td>
+                        <td class="text-center text-warning-emphasis fw-semibold">{{ number_format($u->salidas) }}</td>
+                        <td class="pe-3 text-end text-muted">{{ $u->ultimo }}</td>
+                    </tr>
+                @endforeach
+            </tbody>
+        </table>
+    </div>
+</div>
+@endif
 
 <div class="card border-0 shadow-sm sca-card">
     <div class="card-header bg-white border-bottom d-flex flex-wrap justify-content-between align-items-center gap-2 py-3">
@@ -262,14 +321,24 @@
                         </td>
                         <td><span class="badge rounded-pill px-2 py-1 {{ $estado[1] }}">{{ $estado[0] }}</span></td>
                         <td class="text-center text-nowrap">
+                            {{-- V10.3.11 (P3): los tooltips ahora muestran el TEXTO real de la
+                                 justificación/hallazgo, y debajo de los íconos aparece una línea
+                                 visible con ambos (truncada) — antes solo se veía en el detalle. --}}
                             @if($b->revision_exhaustiva || $b->hallazgo)
-                                <i class="bi bi-search text-primary fs-6" data-bs-toggle="tooltip" title="Revisión exhaustiva"></i>
+                                <i class="bi bi-search text-primary fs-6" data-bs-toggle="tooltip" title="{{ $b->hallazgo ? 'F10: ' . $b->hallazgo->resultado . ($b->hallazgo->descripcion_hallazgo ? ' — ' . \Illuminate\Support\Str::limit($b->hallazgo->descripcion_hallazgo, 80) : '') : 'Revisión exhaustiva' }}"></i>
                             @endif
                             @if($b->id_justificacion || $b->estado_evento === 'revision_horario')
-                                <i class="bi bi-clock-history text-warning fs-6 ms-1" data-bs-toggle="tooltip" title="Justificación de horario"></i>
+                                <i class="bi bi-clock-history text-warning fs-6 ms-1" data-bs-toggle="tooltip" title="{{ $b->justificacion?->nombre ? 'Justificación: ' . $b->justificacion->nombre : 'Justificación de horario' }}"></i>
                             @endif
                             @if(!$b->revision_exhaustiva && !$b->hallazgo && !$b->id_justificacion && $b->estado_evento !== 'revision_horario')
                                 <span class="text-muted">—</span>
+                            @endif
+                            @if($b->justificacion?->nombre || $b->hallazgo?->resultado)
+                                <div class="small text-muted text-truncate" style="max-width:150px" title="{{ ($b->justificacion?->nombre ? 'Justificación: ' . $b->justificacion->nombre . ' ' : '') . ($b->hallazgo?->resultado ? 'F10: ' . $b->hallazgo->resultado : '') }}">
+                                    @if($b->justificacion?->nombre)<span class="text-warning-emphasis">{{ \Illuminate\Support\Str::limit($b->justificacion->nombre, 24) }}</span>@endif
+                                    @if($b->justificacion?->nombre && $b->hallazgo?->resultado) · @endif
+                                    @if($b->hallazgo?->resultado)<span class="text-primary-emphasis">{{ \Illuminate\Support\Str::limit($b->hallazgo->resultado, 24) }}</span>@endif
+                                </div>
                             @endif
                         </td>
                         <td>
@@ -278,7 +347,32 @@
                             <div class="small text-primary-emphasis opacity-75">
                                 {{ $tipoAccesoLabel }}
                                 {{-- V10.3 · CAMBIO #30: referencia directa + badge de inconsistencia --}}
-                                @if(!empty($b->id_solicitud))
+                                {{-- Botón a solicitud: si el acceso fue autorizado por una
+                                     solicitud, el código se vuelve un badge clicable que
+                                     abre la solicitud en OTRA pestaña (no se pierden los
+                                     filtros de bitácora). Funciona para registros nuevos
+                                     (id_solicitud del escáner) Y históricos (reglas),
+                                     porque clasificar() deja el modelo resuelto en
+                                     permiso_contexto. Ruteo por persona_id: "E-x" → EXT,
+                                     numérico → INT (convención de
+                                     Bitacora::solicitudReferenciada()). --}}
+                                @php
+                                    $ctxSol = $b->permiso_contexto;
+                                    $esExtSol = str_starts_with((string) $b->persona_id, 'E-');
+                                    $idSol = $ctxSol
+                                        ? ($esExtSol ? ($ctxSol->id_solicitud_ext ?? null) : ($ctxSol->id_solicitud_int ?? null))
+                                        : null;
+                                    $urlSol = $idSol
+                                        ? route($esExtSol ? 'solicitudes.show.ext' : 'solicitudes.show.int', $idSol)
+                                        : null;
+                                @endphp
+                                @if($urlSol)
+                                    <a href="{{ $urlSol }}" target="_blank" rel="noopener"
+                                       class="badge rounded-pill text-bg-primary text-decoration-none ms-1"
+                                       title="Ver la solicitud que autorizó este acceso">
+                                        <i class="bi bi-box-arrow-up-right"></i> {{ ($esExtSol ? 'EXT-' : 'INT-') . $idSol }}
+                                    </a>
+                                @elseif(!empty($b->id_solicitud))
                                     <span class="text-muted" title="Solicitud vinculada">· {{ str_starts_with((string)$b->persona_id, 'E-') ? 'EXT' : 'INT' }}-{{ $b->id_solicitud }}</span>
                                 @endif
                                 @if($b->solicitud_inconsistente ?? false)
@@ -387,6 +481,42 @@
     rebuildSubtype();
 
     document.getElementById('perPage').addEventListener('change', () => form.submit());
+
+    // V10.3.11 (P7): chips de filtros rápidos — setean campos del form y lo
+    // envían. Hoy = 00:00 a ahora; Ayer = día completo de ayer; 7 días = hace
+    // 6 días a ahora (7 días naturales incluidos).
+    const p2 = v => String(v).padStart(2, '0');
+    const isoLocal = d => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`;
+    const inicioDe = n => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - n); return d; };
+    const fechaDesde = document.getElementById('fecha_desde');
+    const fechaHasta = document.getElementById('fecha_hasta');
+    const estadoSel = document.getElementById('estado');
+    const incidenciaSel = document.getElementById('incidencia');
+
+    document.querySelectorAll('[data-chip]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const c = btn.dataset.chip;
+            if (c === 'hoy') {
+                fechaDesde.value = isoLocal(inicioDe(0));
+                fechaHasta.value = isoLocal(new Date());
+            } else if (c === 'ayer') {
+                const a = inicioDe(1), f = new Date(a);
+                f.setHours(23, 59, 0, 0);
+                fechaDesde.value = isoLocal(a);
+                fechaHasta.value = isoLocal(f);
+            } else if (c === 'semana') {
+                fechaDesde.value = isoLocal(inicioDe(6));
+                fechaHasta.value = isoLocal(new Date());
+            } else if (c === 'denegados') {
+                estadoSel.value = 'denegado';
+            } else if (c === 'pendientes') {
+                estadoSel.value = 'pendiente_revision';
+            } else if (c === 'hallazgos') {
+                incidenciaSel.value = 'hallazgos';
+            }
+            form.submit();
+        });
+    });
 
     document.getElementById('btn-exportar').addEventListener('click', () => {
         const scope = document.getElementById('export_scope').value;
@@ -497,6 +627,7 @@ async function verDetalle(id) {
                     ${data.contexto.anfitrion ? `<div class="col-12"><span class="text-muted d-block">Anfitrión</span><strong>${data.contexto.anfitrion}</strong></div>` : ''}
                     ${data.contexto.motivo ? `<div class="col-12"><span class="text-muted d-block">Motivo</span>${data.contexto.motivo}</div>` : ''}
                     ${data.contexto.creador ? `<div class="col-12"><span class="text-muted d-block">Creador</span><strong>${data.contexto.creador}</strong></div>` : ''}
+                    ${data.contexto.url_solicitud ? `<div class="col-12 mt-2"><a href="${data.contexto.url_solicitud}" target="_blank" rel="noopener" class="btn btn-sm btn-success"><i class="bi bi-box-arrow-up-right me-1"></i>Ver solicitud completa</a></div>` : ''}
                 </div></div>`;
         }
 

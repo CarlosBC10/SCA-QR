@@ -29,6 +29,6 @@ return [
     //   colapsando el flujo del kiosko. Se cambia a 10 (lo que pide el SRS)
     //   y se permite override por .env para pruebas de stress.
     'exentos_revision'        => env('SCA_EXENTOS_REVISION', []), // IDs de empleados que nunca se sortean
-    'probabilidad_revision'   => env('SCA_PROBABILIDAD_REVISION', 20), // % de accesos sorteado (1-100)
+    'probabilidad_revision'   => env('SCA_PROBABILIDAD_REVISION', 10), // % de accesos sorteado (1-100)
     'minutos_timeout_revision'=> env('SCA_TIMEOUT_REVISION', 5),  // minutos máximos antes de descartar un pendiente
 ];

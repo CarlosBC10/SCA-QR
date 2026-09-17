@@ -455,14 +455,24 @@ class ScannerController extends Controller
                 ];
             }
 
-            // V5: Buscar si hubo entrada hoy por persona_id
-            $esPrimeraEntrada = (
-                $tipoEvento === 'entrada'
-                && (
-                    $ultimoEvento === null
-                    || $ultimoEvento->tipo_evento === 'salida'
-                )
-            );
+            // ============================================================
+            // FIX regresión 8f90c05 (11-sep-2026): restaurar la regla V5
+            // real: la puntualidad SOLO se evalúa en la PRIMERA entrada
+            // del turno. Lo que esto reemplazaba ("último evento fue
+            // salida") trataba CADA reingreso tras una salida como primera
+            // entrada → volvía a pedir justificación en cada regreso.
+            //
+            // ¿Ya existe una entrada (no denegada) dentro del turno vigente?
+            // La ventana arrista 30 min antes de la hora de entrada para
+            // cubrir llegadas tempranas dentro de tolerancia.
+            // ============================================================
+            $inicioTurno = $this->inicioDelTurnoActual($empleado);
+            $huboEntradaEnTurno = Bitacora::where('persona_id', (string) $empleado->id_empleado)
+                ->where('tipo_evento', 'entrada')
+                ->noDenegados()
+                ->where('fecha_hora', '>=', $inicioTurno->subMinutes(30)->format('Y-m-d H:i:s'))
+                ->exists();
+            $esPrimeraEntrada = ($tipoEvento === 'entrada' && !$huboEntradaEnTurno);
 
             // FIX interplantas: pasamos $plantaId para que validarHorario
             // pueda saltarse la validación de turno cuando hay un permiso
@@ -635,6 +645,23 @@ class ScannerController extends Controller
                     }
                 }
             }
+
+            // ────────────────────────────────────────────────────────
+            // FIX permiso_entrada en SALIDAS · mensaje de kiosko.
+            // Cuando validarHorario() autoriza una salida porque hay un
+            // PERMISO DE ENTRADA vigente (ej: permiso 9:00-11:00 y la
+            // persona sale a las 10:00), devuelve tipo_permiso=
+            // 'permiso_entrada'. Sin este bloque el kiosko mostraría el
+            // genérico "Salida registrada correctamente." y el guardia
+            // no sabría que la salida fue eximida por un permiso
+            // aprobado. No pisa los mensajes de pase_salida/
+            // interplantas porque esas ramas nunca devuelven
+            // tipo_permiso='permiso_entrada'.
+            // ────────────────────────────────────────────────────────
+            if ($tipoEvento === 'salida' && ($horario['tipo_permiso'] ?? null) === 'permiso_entrada') {
+                $message = 'Salida autorizada con PERMISO DE ENTRADA (dentro de la vigencia autorizada).';
+            }
+
 
             // Avisos de búsqueda manual (no se pierden)
             if ($origen === 'manual' && $usosRestantes <= 1 && $usosRestantes > 0) {
@@ -1818,6 +1845,39 @@ class ScannerController extends Controller
             return 'No tiene entrada registrada. Diríjase al escáner de ENTRADA.';
         }
         return 'No se puede registrar el evento en este momento.';
+    }
+
+    /**
+     * FIX regresión 8f90c05: inicio del turno VIGENTE del empleado.
+     *
+     * - Turno normal (ej. 08:00-16:00) → hoy a la hora de entrada.
+     * - Turno nocturno (ej. 22:00-06:00) y ya pasó medianoche → AYER a
+     *   la hora de entrada (su turno "de hoy" empezó ayer por la noche).
+     * - Sin turno → inicio del día actual (equivalente al ->hoy()
+     *   histórico; validarHorario() aplicará luego la regla sin_turno).
+     */
+    private function inicioDelTurnoActual(Empleado $empleado): \Carbon\Carbon
+    {
+        $ahora = now();
+
+        if (!$empleado->turno || !$empleado->turno->entrada) {
+            return $ahora->copy()->startOfDay();
+        }
+
+        $entradaStr = $empleado->turno->entrada;
+        $inicio = $ahora->copy()->startOfDay()->setTimeFromTimeString($entradaStr);
+
+        // ¿Turno nocturno? (la hora de salida es "menor" que la de entrada)
+        $esNocturno = $empleado->turno->salida
+            && strtotime($empleado->turno->salida) < strtotime($entradaStr);
+
+        // Si es nocturno y AHORA es antes de la hora de entrada, el turno
+        // vigente empezó AYER (son 02:00, turno 22:00-06:00 → empezó ayer 22:00)
+        if ($esNocturno && strtotime($ahora->format('H:i:s')) < strtotime($entradaStr)) {
+            $inicio->subDay();
+        }
+
+        return $inicio;
     }
 
     /**

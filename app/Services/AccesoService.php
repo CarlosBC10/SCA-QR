@@ -331,6 +331,17 @@ class AccesoService
                     'motivo_codigo'          => 'entrada_sin_permiso',
                 ];
             }
+            // ────────────────────────────────────────────────────────
+            // FIX permiso_entrada en SALIDAS: si la persona está adentro
+            // amparada por un permiso de entrada, su salida se juzga contra
+            // la VIGENCIA DEL PERMISO (9-11 y sale 10:00 → autorizada;
+            // sale 11:01 → justifica), no contra el turno que no tiene.
+            // ────────────────────────────────────────────────────────
+            $salidaPorPermiso = $this->evaluarSalidaPorPermisoEntrada($empleado, $plantaDestinoId, 'sin_turno');
+            if ($salidaPorPermiso !== null) {
+                return $salidaPorPermiso;
+            }
+
             return [
                 'permitido'              => true,
                 'requiere_justificacion' => true,
@@ -369,6 +380,17 @@ class AccesoService
                         'motivo_codigo'          => 'entrada_sin_permiso',
                     ];
                 }
+                // ────────────────────────────────────────────────────
+                // FIX permiso_entrada en SALIDAS: mismo criterio que las
+                // demás ramas — la vigencia del permiso manda sobre el
+                // día no laboral (entró con permiso 9-11, sale 10:00 →
+                // autorizada; sale 11:01 → justifica).
+                // ────────────────────────────────────────────────────
+                $salidaPorPermiso = $this->evaluarSalidaPorPermisoEntrada($empleado, $plantaDestinoId, 'dia_no_laboral');
+                if ($salidaPorPermiso !== null) {
+                    return $salidaPorPermiso;
+                }
+
                 return [
                     'permitido'              => true,
                     'requiere_justificacion' => true,
@@ -402,6 +424,15 @@ class AccesoService
                         'motivo_codigo'          => 'entrada_sin_permiso',
                     ];
                 }
+                // ────────────────────────────────────────────────────
+                // FIX permiso_entrada en SALIDAS: idem domingo operativo —
+                // la vigencia del permiso manda sobre el día no laboral.
+                // ────────────────────────────────────────────────────
+                $salidaPorPermiso = $this->evaluarSalidaPorPermisoEntrada($empleado, $plantaDestinoId, 'dia_no_laboral');
+                if ($salidaPorPermiso !== null) {
+                    return $salidaPorPermiso;
+                }
+
                 return [
                     'permitido'              => true,
                     'requiere_justificacion' => true,
@@ -585,6 +616,23 @@ class AccesoService
                         'id_solicitud'           => $permisoSalida['id_solicitud'] ?? null, // V10.3: trazabilidad
                     ];
                 }
+                // ────────────────────────────────────────────────────
+                // FIX permiso_entrada en SALIDAS: la persona puede estar
+                // adentro bajo un PERMISO DE ENTRADA (ej: entró 9:05 con
+                // permiso 9:00-11:00 y su turno inicia 13:00). Se consulta
+                // DESPUÉS del pase_salida/interplantas (un permiso de SALIR
+                // es más específico para salir) y ANTES del pase vencido:
+                // un permiso de entrada VIGENTE pesa más que uno vencido.
+                //   · Sale 10:00 (vigente) → autorizada sin justificación.
+                //   · Sale 11:01 (vencido) → sale, pero justifica y la
+                //     bitácora queda vinculada al permiso (trazabilidad).
+                // ────────────────────────────────────────────────────
+                $salidaPorPermiso = $this->evaluarSalidaPorPermisoEntrada($empleado, $plantaDestinoId, 'salida_antes_turno');
+                if ($salidaPorPermiso !== null) {
+                    return $salidaPorPermiso;
+                }
+
+
                 // V10.3-FIX: si existe un permiso interno ya vencido para esta
                 // persona/planta, la salida nunca se bloquea; se permite con
                 // justificación y se conserva la trazabilidad del permiso.
@@ -624,6 +672,26 @@ class AccesoService
                         'id_solicitud'           => $permisoSalida['id_solicitud'] ?? null, // V10.3: trazabilidad
                     ];
                 }
+
+                // ────────────────────────────────────────────────────
+                // FIX permiso_entrada en SALIDAS (durante el turno): si hay
+                // un permiso de entrada VIGENTE que cubre este momento (ej:
+                // permiso 9:00-11:00, turno 8:00-17:00, sale 10:00), la
+                // salida se autoriza por el permiso — la ventana aprobada
+                // manda sobre el turno (mismo criterio que interplantas
+                // vigente al inicio de validarHorario). OJO: aquí NO aplica
+                // el caso "vencido" ($aplicarVencido=false): si el permiso
+                // ya venció y la persona está a media jornada, necesita un
+                // pase de salida o espera el fin de turno; un permiso de
+                // ENTRADA vencido no exime de la regla "operativo no
+                // abandona la jornada sin pase".
+                // ────────────────────────────────────────────────────
+                $salidaPorPermiso = $this->evaluarSalidaPorPermisoEntrada($empleado, $plantaDestinoId, 'salida_temprana', false);
+                if ($salidaPorPermiso !== null) {
+                    return $salidaPorPermiso;
+                }
+
+                
                 // V10.3-FIX: un permiso interno vencido no bloquea la salida.
                 $permisoVencido = $this->obtenerPermisoParaSalirVencido($empleado->id_empleado, $plantaDestinoId);
                 if ($permisoVencido) {
@@ -876,6 +944,149 @@ class AccesoService
             ->orderBy('fecha_fin', 'asc')  // si hay varios, el que vence primero
             ->first();
     }
+
+    // ============================================================
+    // FIX permiso_entrada en SALIDAS · PERMISO DE ENTRADA VENCIDO (nuevo)
+    // ============================================================
+    //
+    // ¿Existió un permiso_entrada aprobado para esta persona/planta que
+    // ya inició y ya VENCIÓ hoy? Es el espejo de obtenerPermisoEntradaVigente()
+    // con el rango desplazado, y sigue el patrón de
+    // obtenerInterplantasVencidoSinSalir().
+    //
+    // Reglas:
+    //   - tipo = 'permiso_entrada'.
+    //   - estado IN ('aprobado','aprobado_parcial','expirado').
+    //     'expirado' es OBLIGATORIO: el accessor lazy de SolicitudInt
+    //     muta el estado a 'expirado' cuando fecha_fin < now(), así que
+    //     un permiso que acaba de vencer ya NO está 'aprobado' en BD.
+    //   - fecha_inicio <= ahora (ya había iniciado) y fecha_fin < ahora
+    //     (ya venció). Un permiso que ni siquiera empezó no cuenta.
+    //   - Acotado a permisos cuya vigencia TERMINÓ HOY
+    //     (whereDate fecha_fin = hoy): es el permiso que regía la
+    //     presencia de HOY. Uno de días atrás no debe influir en la
+    //     salida de hoy ni enlazarse a su bitácora (trazabilidad
+    //     limpia). Cubre también permisos que cruzan medianoche
+    //     (ej: 22:00-06:00 → fecha_fin cae hoy a las 06:00).
+    //   - Planta: permiso_entrada siempre origen = destino = planta
+    //     base del beneficiario → filtro por id_planta_destino.
+    //   - Beneficiario: creador (solo si la solicitud es individual) o
+    //     integrante de lista grupal aprobado ('expirado' incluido por
+    //     el accessor lazy de SolicitudEmpleado).
+    //   - orderByDesc(fecha_fin): si hubiera varios vencidos hoy, el más
+    //     reciente es el que regía la presencia actual.
+    public function obtenerPermisoEntradaVencido(int $empleadoId, ?int $plantaId = null): ?SolicitudInt
+    {
+        $ahora = Carbon::now();
+
+        $query = SolicitudInt::where('tipo', 'permiso_entrada')
+            ->whereIn('estado', ['aprobado', 'aprobado_parcial', 'expirado'])
+            ->where('fecha_inicio', '<=', $ahora)
+            ->where('fecha_fin', '<', $ahora)
+            ->whereDate('fecha_fin', $ahora->toDateString());
+
+        if ($plantaId !== null) {
+            $query->where('id_planta_destino', $plantaId);
+        }
+
+        return $query
+            ->where(function ($q) use ($empleadoId) {
+                $q->where(function ($qIndividual) use ($empleadoId) {
+                    $qIndividual->where('creador_empleado_id', $empleadoId)
+                                ->whereDoesntHave('empleados');
+                })
+                  ->orWhereHas('empleados', function ($q2) use ($empleadoId) {
+                      $q2->where('empleado_id', $empleadoId)
+                         ->whereIn('estado', ['aprobado', 'expirado']);
+                  });
+            })
+            ->orderByDesc('fecha_fin')
+            ->first();
+    }
+
+    // ============================================================
+    // FIX permiso_entrada en SALIDAS · EVALUADOR CENTRAL (nuevo)
+    // ============================================================
+    //
+    // ¿POR QUÉ EXISTE? V10.3 integró permiso_entrada en las ramas de
+    // ENTRADA de validarHorario(), pero las ramas de SALIDA solo
+    // consultaban pase_salida/interplantas (obtenerPermisoParaSalir).
+    // Una persona que entró 9:00 con permiso 9:00-11:00 y salía 10:00
+    // —dentro de la vigencia— recibía "Salida fuera de horario" y el
+    // guardia debía justificar un acceso perfectamente autorizado:
+    // la salida se juzgaba contra el TURNO, ignorando el permiso que
+    // era el motivo de estar adentro.
+    //
+    // REGLA (simétrica a la de interplantas en validarHorario):
+    //   · Permiso VIGENTE al salir (9-11, sale 10:00) → AUTORIZADA sin
+    //     justificación, id_solicitud vinculada en la bitácora y
+    //     tipo_permiso='permiso_entrada' para el mensaje del kiosko.
+    //   · Permiso VENCIÓ (sale 11:01) → la salida NUNCA se bloquea,
+    //     pero REQUIERE justificación; la bitácora de revisión queda
+    //     vinculada al permiso vencido (trazabilidad: la ficha de
+    //     auditoría mostrará qué permiso originó la presencia).
+    //
+    // Se llama desde las 5 ramas de salida "anómala" de validarHorario().
+    // Devuelve el array-result completo (para return directo) o null
+    // si no hay permiso_entrada relevante → la rama sigue sus reglas.
+    //
+    // $motivoCodigo: código de la rama llamadora ('sin_turno',
+    //   'dia_no_laboral', 'salida_antes_turno', 'salida_temprana') para
+    //   conservar la semántica original del evento cuando se justifica.
+    //
+    // $aplicarVencido=false: solo lo usa la rama "salida DURANTE el
+    //   turno" — ahí un permiso VIGENTE sí autoriza salir dentro de su
+    //   ventana, pero uno VENCIDO no exime de la regla "operativo no
+    //   sale a media jornada sin pase" (el permiso de entrada nunca
+    //   fue permiso de salir).
+    private function evaluarSalidaPorPermisoEntrada(Empleado $empleado, ?int $plantaDestinoId, string $motivoCodigo, bool $aplicarVencido = true): ?array
+    {
+        // 1) ¿Permiso de entrada VIGENTE que cubra este momento?
+        //    (fecha_inicio <= ahora <= fecha_fin, planta, beneficiario)
+        $permisoVigente = $this->obtenerPermisoEntradaVigente($empleado->id_empleado, $plantaDestinoId);
+        if ($permisoVigente) {
+            return [
+                'permitido'              => true,
+                'requiere_justificacion' => false,
+                'motivo'                 => null,
+                'motivo_codigo'          => null,
+                // Trazabilidad: la bitácora AUTORIZADA queda vinculada a
+                // la solicitud (ScannerController ya la guarda en
+                // id_solicitud desde el array $horario).
+                'id_solicitud'           => (string) $permisoVigente->id_solicitud_int,
+                // Marca para que ScannerController muestre "Salida
+                // autorizada con PERMISO DE ENTRADA" en el kiosko.
+                'tipo_permiso'           => 'permiso_entrada',
+            ];
+        }
+
+        // 2) ¿Permiso de entrada que ya VENCIÓ hoy?
+        //    (solo si la rama llamadora lo permite)
+        if ($aplicarVencido) {
+            $permisoVencido = $this->obtenerPermisoEntradaVencido($empleado->id_empleado, $plantaDestinoId);
+            if ($permisoVencido) {
+                return [
+                    'permitido'              => true,
+                    'requiere_justificacion' => true,
+                    // Mensaje específico: la persona y el guardia saben
+                    // QUÉ venció y cuándo (mejor que el genérico
+                    // "fuera de horario").
+                    'motivo'                 => 'Su permiso de entrada venció a las '
+                                                    . Carbon::parse($permisoVencido->fecha_fin)->format('H:i')
+                                                    . '. Justifique su salida.',
+                    'motivo_codigo'          => $motivoCodigo,
+                    // Trazabilidad: la bitácora de revisión
+                    // (revision_horario) queda vinculada al permiso
+                    // vencido que originó la presencia.
+                    'id_solicitud'           => (string) $permisoVencido->id_solicitud_int,
+                ];
+            }
+        }
+
+        // 3) Nada que evaluar → la rama llamadora sigue su curso normal.
+        return null;
+    }
+
 
     // ============================================================
     // V10.3-FIX: PERMISO INTERNO VENCIDO PARA SALIDA

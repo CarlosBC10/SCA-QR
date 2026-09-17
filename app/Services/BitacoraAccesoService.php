@@ -277,8 +277,9 @@ class BitacoraAccesoService
                                         ->orWhereColumn('solicitudes_int.id_planta_destino', 'bitacora.id_planta');
                                 });
                         })->orWhere(function ($q) {
+                            // CORRECCIÓN APLICADA: Se eliminó ->where('bitacora.tipo_evento', 'entrada')
+                            // para ser consistentes con la regla dictada en whereExistsPermisoEntrada.
                             $q->where('solicitudes_int.tipo', self::PERMISO_ENTRADA)
-                                ->where('bitacora.tipo_evento', 'entrada')
                                 ->whereColumn('solicitudes_int.id_planta_destino', 'bitacora.id_planta');
                         });
                     })
@@ -318,7 +319,7 @@ class BitacoraAccesoService
                             ->when($f->anfitrion, function ($q) use ($f) {
                                 $ids = Empleado::where('nombre_completo', 'like', '%' . $f->anfitrion . '%')->pluck('id_empleado');
                                 $q->whereIn('solicitudes_ext.anfitrion_empleado_id', $ids->isEmpty() ? [-1] : $ids);
-                            })
+                            }); // CORRECCIÓN APLICADA: Faltaba el punto y coma (;)
                     })->orWhere(function ($historico) use ($f) {
                         $historico->whereNull('bitacora.id_solicitud')
                             ->whereIn('solicitudes_ext.estado', ['aprobado', 'aprobado_parcial', 'expirado'])
@@ -330,7 +331,7 @@ class BitacoraAccesoService
                             ->when($f->anfitrion, function ($q) use ($f) {
                                 $ids = Empleado::where('nombre_completo', 'like', '%' . $f->anfitrion . '%')->pluck('id_empleado');
                                 $q->whereIn('solicitudes_ext.anfitrion_empleado_id', $ids->isEmpty() ? [-1] : $ids);
-                            })
+                            }); // CORRECCIÓN APLICADA: Faltaba el punto y coma (;)
                     });
                 });
         });

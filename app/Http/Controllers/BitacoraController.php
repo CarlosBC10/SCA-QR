@@ -50,6 +50,41 @@ class BitacoraController extends Controller
             'pendientes' => (int) $stats->pendientes,
         ];
 
+        // ────────────────────────────────────────────────────────
+        // V10.3.11 (P5): resumen de uso por persona cuando el filtro
+        // activo es "Permiso de Entrada". Clona la MISMA consulta ya
+        // filtrada y agrega un solo GROUP BY (barato en SQL). Solo se
+        // calcula si el subtipo está activo para no pagar costos en
+        // las demás vistas.
+        // ────────────────────────────────────────────────────────
+        $usoPermiso = null;
+        if ($filtros->subtipo === 'permiso_entrada') {
+            $agrupado = (clone $query)
+                ->selectRaw("
+                    bitacora.persona_id,
+                    COUNT(*) AS eventos,
+                    COALESCE(SUM(bitacora.tipo_evento = 'entrada'), 0) AS entradas,
+                    COALESCE(SUM(bitacora.tipo_evento = 'salida'), 0) AS salidas,
+                    MAX(bitacora.fecha_hora) AS ultimo
+                ")
+                ->groupBy('bitacora.persona_id')
+                ->orderByDesc('eventos')
+                ->limit(15)
+                ->get();
+
+            $nombres = Empleado::query()
+                ->whereIn('id_empleado', $agrupado->pluck('persona_id')->map(fn($v) => (int) $v))
+                ->pluck('nombre_completo', 'id_empleado');
+
+            $usoPermiso = $agrupado->map(fn($r) => (object) [
+                'persona'   => $nombres[(int) $r->persona_id] ?? ('ID ' . $r->persona_id),
+                'eventos'   => (int) $r->eventos,
+                'entradas'  => (int) $r->entradas,
+                'salidas'   => (int) $r->salidas,
+                'ultimo'    => $r->ultimo ? Carbon::parse($r->ultimo)->format('d/m/Y H:i') : '—',
+            ]);
+        }
+
         $bitacoras = $query
             ->with(['planta', 'guardia', 'justificacion', 'hallazgo'])
             ->orderByDesc('bitacora.fecha_hora')
@@ -68,7 +103,8 @@ class BitacoraController extends Controller
             'resumen',
             'esSuperior',
             'perPage',
-            'clasificacion'
+            'clasificacion',
+            'usoPermiso'
         ));
     }
 
@@ -110,8 +146,17 @@ class BitacoraController extends Controller
                 $b->estado_evento === 'denegado' ? 'Denegado' : ($b->estado_evento === 'autorizado' ? 'Autorizado' : ucfirst(str_replace('_', ' ', $b->estado_evento))),
                 $bitacoraService->etiquetaTipo($b->tipo_acceso ?? BitacoraAccesoService::ESTANDAR),
                 $b->persona_obj?->nombre_completo ?? 'Desconocido',
+                // V10.3.11 (P4): columnas nuevas del export — ID, guardia,
+                // justificación y hallazgo F10 (auditoría completa sin abrir
+                // detalle por detalle).
+                (string) $b->persona_id,
                 !str_starts_with((string) $b->persona_id, 'E-') ? 'Interno' : 'Externo',
                 $b->planta?->nombre ?? 'N/A',
+                $b->guardia?->nombre_completo ?? 'Sistema',
+                $b->justificacion?->nombre ?? '',
+                $b->hallazgo
+                    ? ($b->hallazgo->resultado . ($b->hallazgo->descripcion_hallazgo ? ' — ' . $b->hallazgo->descripcion_hallazgo : ''))
+                    : '',
                 $this->textoIncidencia($b),
                 $b->motivo_denegacion ?? '',
             ];
@@ -123,7 +168,7 @@ class BitacoraController extends Controller
             echo "\xEF\xBB\xBF";
             echo '<html><head><meta charset="UTF-8"></head><body><table border="1">';
             echo '<tr>';
-            foreach (['Fecha/Hora', 'Movimiento', 'Estado', 'Tipo de acceso', 'Persona', 'Clasificación', 'Planta', 'Incidencias', 'Motivo denegación'] as $head) {
+            foreach (['Fecha/Hora', 'Movimiento', 'Estado', 'Tipo de acceso', 'Persona', 'ID Persona', 'Clasificación', 'Planta', 'Guardia', 'Justificación', 'Hallazgo F10', 'Incidencias', 'Motivo denegación'] as $head) {
                 echo '<th>' . e($head) . '</th>';
             }
             echo '</tr>';
@@ -193,6 +238,15 @@ class BitacoraController extends Controller
             $query->where(function ($q) {
                 $q->where('bitacora.estado_evento', 'revision_horario')
                     ->orWhereNotNull('bitacora.id_justificacion');
+            });
+        } elseif ($filtros->incidencia === 'hallazgos') {
+            // V10.3.11 (P2): "Solo hallazgos F10" — eventos donde el guardia
+            // registró un hallazgo en la revisión (distinto de la revisión
+            // exhaustiva en sí, que ya la cubre la opción "Revisión").
+            $query->whereExists(function ($h) {
+                $h->selectRaw('1')
+                    ->from('revision_hallazgos')
+                    ->whereColumn('revision_hallazgos.id_bitacora', 'bitacora.id_bitacora');
             });
         }
 
@@ -273,9 +327,12 @@ class BitacoraController extends Controller
             $request->input('subtipo') ?: null,
             $request->filled('planta') ? (int) $request->input('planta') : null,
             in_array($request->input('tipo'), ['entrada', 'salida'], true) ? $request->input('tipo') : null,
-            in_array($request->input('estado'), ['autorizado', 'denegado'], true) ? $request->input('estado') : null,
+            // V10.3.11 (P6): el dropdown de Estado ahora también ofrece
+            // los estados intermedios que la BD sí contiene.
+            in_array($request->input('estado'), ['autorizado', 'denegado', 'pendiente_revision', 'revision_horario'], true) ? $request->input('estado') : null,
             trim((string) $request->input('motivo')) ?: null,
-            in_array($request->input('incidencia'), ['revision', 'justificacion'], true) ? $request->input('incidencia') : null,
+            // V10.3.11 (P2): nueva opción de incidencia "solo hallazgos".
+            in_array($request->input('incidencia'), ['revision', 'justificacion', 'hallazgos'], true) ? $request->input('incidencia') : null,
             trim((string) $request->input('buscar')) ?: null,
             $fechaDesdeParsed,
             $fechaHasta
