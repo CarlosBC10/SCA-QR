@@ -72,13 +72,11 @@
                 <div class="col-12 col-md-3 col-xl-2">
                     <label for="fecha_desde" class="form-label small fw-semibold text-muted">Desde</label>
                     <input type="datetime-local" class="form-control" name="fecha_desde" id="fecha_desde" value="{{ request('fecha_desde') }}">
-                    <div class="form-text">Vacío = desde siempre.</div>
                 </div>
 
                 <div class="col-12 col-md-3 col-xl-2">
                     <label for="fecha_hasta" class="form-label small fw-semibold text-muted">Hasta</label>
                     <input type="datetime-local" class="form-control" name="fecha_hasta" id="fecha_hasta" value="{{ $fechaHastaDefault }}">
-                    <div class="form-text">Por defecto, ahora.</div>
                 </div>
 
                 <div class="col-12 col-md-4 col-xl-2">
@@ -222,9 +220,6 @@
     <button type="button" class="btn btn-sm btn-outline-secondary" data-chip="hoy">Hoy</button>
     <button type="button" class="btn btn-sm btn-outline-secondary" data-chip="ayer">Ayer</button>
     <button type="button" class="btn btn-sm btn-outline-secondary" data-chip="semana">Últimos 7 días</button>
-    <button type="button" class="btn btn-sm btn-outline-danger" data-chip="denegados"><i class="bi bi-x-octagon me-1"></i>Denegados</button>
-    <button type="button" class="btn btn-sm btn-outline-info" data-chip="pendientes"><i class="bi bi-hourglass-split me-1"></i>Pendientes</button>
-    <button type="button" class="btn btn-sm btn-outline-primary" data-chip="hallazgos"><i class="bi bi-search me-1"></i>Hallazgos F10</button>
 </div>
 
 {{-- V10.3.11 (P5): resumen de uso por persona — solo visible cuando el filtro
