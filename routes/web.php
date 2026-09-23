@@ -164,15 +164,15 @@ Route::middleware(['auth', 'debe_cambiar_password'])->group(function () {
         Route::get('/api/justificaciones', [CatalogoController::class, 'justificaciones'])->name('api.justificaciones');
     });
 
-    // ============================================================
-    // FIX #7: Cambio de contraseñas administrativo
-    // ============================================================
-    // Guardia NO tiene acceso a estas operaciones.
-    // El método del controlador mantiene además el scoping por planta
-    // para Aprobadores.
+    // M3: reset-password ahora es UNIFICADO — también cubre guardias:
+    //   - Empleado → contraseña temporal a SU propio correo.
+    //   - Guardia  → contraseña temporal al correo de QUIEN RESETEA
+    //                (los guardias no tienen correo propio), cierra sus
+    //                kioskos activos y limpia el remember_token.
+    //   El cambio directo de contraseña de guardia fue eliminado
+    //   (cambiarPasswordGuardia ya no existe).
     Route::middleware('role:Superadmin,Admin,Aprobador')->group(function () {
         Route::post('/usuarios/{usuario}/reset-password', [\App\Http\Controllers\UsuarioController::class, 'resetPassword'])->name('usuarios.reset-password');
-        Route::post('/usuarios/{usuario}/cambiar-password-guardia', [\App\Http\Controllers\UsuarioController::class, 'cambiarPasswordGuardia'])->name('usuarios.cambiar-password-guardia');
     });
 
     // ------------------------------------------------------------
@@ -187,6 +187,14 @@ Route::middleware(['auth', 'debe_cambiar_password'])->group(function () {
         Route::post('/usuarios/empleado', [UsuarioController::class, 'storeEmpleado'])->name('usuarios.store.empleado');
         Route::post('/usuarios/guardia', [UsuarioController::class, 'storeGuardia'])->name('usuarios.store.guardia');
         Route::get('/usuarios/buscar-empleado', [UsuarioController::class, 'buscarEmpleado'])->name('usuarios.buscar');
+
+        // M3: Búsqueda de guardias existentes (por CURP exacta/prefijo, ID G-XXXX
+        // o nombre) para el panel de verificación del form de crear guardia.
+        Route::get('/usuarios/buscar-guardia', [UsuarioController::class, 'buscarGuardia'])->name('usuarios.buscar.guardia');
+
+        // M3: Vista previa del siguiente username de guardia (G-XXXX autogenerado).
+        // Solo referencial: el username definitivo se genera en el servidor al guardar.
+        Route::get('/usuarios/next-guardia-username', [UsuarioController::class, 'nextGuardiaUsername'])->name('usuarios.next-guardia');
     });
 
     // ------------------------------------------------------------

@@ -3,14 +3,14 @@
     {{-- Header --}}
     <div style="background: linear-gradient(135deg, #1b5e20 0%, #2e7d32 100%); padding: 30px; text-align: center;">
         <h1 style="color: #ffffff; margin: 0; font-size: 26px; letter-spacing: 1px;">FRUITEX DE MÉXICO</h1>
-        <p style="color: #c8e6c9; margin: 5px 0 0 0; font-size: 14px; text-transform: uppercase; letter-spacing: 2px;">Sistema SCA-QR</p>
+        <p style="color: #c8e6c9; margin: 5px 0 0 0; font-size: 14px; text-transform: uppercase; letter-spacing: 2px;">Sistema SCA</p>
     </div>
 
     {{-- Body --}}
     <div style="padding: 40px 30px; background-color: #ffffff;">
         <h2 style="color: #1b5e20; margin-top: 0; font-size: 22px; font-weight: 600;">Bienvenido(a), {{ $nombreCompleto }}</h2>
         <p style="font-size: 16px; color: #4a5568; line-height: 1.6; margin-bottom: 25px;">
-            Se ha creado su cuenta de acceso al sistema SCA-QR. Para iniciar sesión, utilice las siguientes credenciales temporales:
+            Se ha creado su cuenta de acceso al sistema SCA. Para iniciar sesión, utilice las siguientes credenciales temporales:
         </p>
 
         {{-- Credentials Box --}}

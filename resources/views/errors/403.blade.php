@@ -7,7 +7,7 @@
 <div class="sca-error-screen">
     <div class="sca-error-card">
         <div class="sca-error-icon"><i class="bi bi-shield-lock" aria-hidden="true"></i></div>
-        <div class="sca-kicker">Sistema de Control de Accesos mediante QR</div>
+        <div class="sca-kicker">Sistema de Control de Accesos</div>
         <div class="sca-error-code">403</div>
         <h1>Acceso restringido</h1>
         <p>No tienes permisos para consultar este recurso.</p>

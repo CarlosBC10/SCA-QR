@@ -23,7 +23,7 @@ class PasswordTemporalMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Credenciales de acceso - SCA-QR (Fruitex de México)',
+            subject: 'Pases de acceso (SCA)',
         );
     }
 

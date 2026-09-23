@@ -96,6 +96,15 @@
                         {{-- V4: $u->activo es un accessor que revisa fecha_baja --}}
                         @if($u->activo)
                             <span class="badge bg-success">Activo</span>
+                            {{-- M3: contraseña temporal pendiente de cambiar (prefijo 'temp:').
+                                $hidden solo afecta serialización; el atributo es accesible aquí. --}}
+                            @if($u->password && str_starts_with($u->password, 'temp:'))
+                                <div class="mt-1">
+                                    <span class="badge bg-warning text-dark" title="Tiene una contraseña temporal sin cambiar (primer login pendiente)">
+                                        <i class="bi bi-exclamation-triangle"></i> Debe cambiar contraseña
+                                    </span>
+                                </div>
+                            @endif
                         @else
                             <span class="badge bg-secondary">Inactivo</span>
                         @endif
@@ -108,25 +117,21 @@
                                 <i class="bi bi-pencil"></i>
                             </a>
 
-                            {{-- M2 [ScaModal] — Resetear contraseña (empleado interno).
-                                Solo para empleados internos ACTIVOS (no guardias, no desactivados).
-                                Envía correo con contraseña temporal. --}}
-                            @if($u->id_usuario_sca !== Auth::id() && !$u->esGuardia() && $u->activo)
-                            <form action="{{ route('usuarios.reset-password', $u->id_usuario_sca) }}" method="POST" class="d-inline sca-form-reset" data-nombre="{{ $u->nombre_completo ?? $u->username }}" data-email="{{ $u->email_emp ?? '' }}">
+                            {{-- M3 [ScaModal] — Resetear contraseña (UNIFICADO: empleados y guardias).
+                                Solo para usuarios ACTIVOS distintos de uno mismo.
+                                - Empleado → temporal a SU propio correo.
+                                - Guardia  → temporal al correo de QUIEN RESETEA
+                                  (data-email ya apunta al correo del operador logueado),
+                                  cierra sus kioskos activos y limpia remember_token.
+                                El guardia cambia la contraseña en su primer login. --}}
+                            @if($u->id_usuario_sca !== Auth::id() && $u->activo)
+                            <form action="{{ route('usuarios.reset-password', $u->id_usuario_sca) }}" method="POST" class="d-inline sca-form-reset"
+                                  data-nombre="{{ $u->nombre_completo ?? $u->username }}"
+                                  data-email="{{ $u->esGuardia() ? (auth()->user()->email_emp ?? '') : ($u->email_emp ?? '') }}"
+                                  data-es-guardia="{{ $u->esGuardia() ? '1' : '0' }}"
+                                  data-debe-cambiar="{{ (str_starts_with((string) $u->password, 'temp:')) ? '1' : '0' }}">
                                 @csrf
-                                <button type="submit" class="btn btn-sm btn-outline-warning" title="Resetear contraseña (envía correo)">
-                                    <i class="bi bi-key"></i>
-                                </button>
-                            </form>
-                            @endif
-
-                            {{-- M2 [ScaModal] — Cambiar contraseña (guardia).
-                                Solo para guardias ACTIVOS (no empleados internos).
-                                El admin define la nueva contraseña directamente (sin correo). --}}
-                            @if($u->id_usuario_sca !== Auth::id() && $u->esGuardia() && $u->activo)
-                            <form action="{{ route('usuarios.cambiar-password-guardia', $u->id_usuario_sca) }}" method="POST" class="d-inline sca-form-pass-guardia" data-nombre="{{ $u->nombre_completo ?? $u->username }}" data-username="{{ $u->username }}">
-                                @csrf
-                                <button type="submit" class="btn btn-sm btn-outline-warning" title="Cambiar contraseña (directa)">
+                                <button type="submit" class="btn btn-sm btn-outline-warning" title="Resetear contraseña (envía temporal por correo)">
                                     <i class="bi bi-key"></i>
                                 </button>
                             </form>
@@ -162,32 +167,53 @@
 
 @push('scripts')
 <script>
+// M3 v2: escape de valores dinámicos antes de inyectarlos con innerHTML.
+// Los datos vienen de BD (nombre, CURP, planta, puesto...) y no se debe
+// asumir que jamás contendrán HTML. esc() cubre texto y atributos.
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+}[c]));
+
 // ============================================================
-// M2 [ScaModal] — Handlers para los forms de la tabla de usuarios.
+// M2/M3 [ScaModal] — Handlers para los forms de la tabla de usuarios.
 //
 // Maneja 2 flujos:
-//   1. Form de reset password (.sca-form-reset):
-//      → ScaModal.confirm warning con email → loading → AJAX POST → flash en destino
+//   1. Form de reset password (.sca-form-reset, UNIFICADO empleado/guardia):
+//      → ScaModal.confirm warning (mensaje según tipo) → loading → AJAX POST → flash en destino
 //   2. Form de desactivar (.sca-form-destroy):
 //      → ScaModal.confirm danger con nombre → loading → AJAX DELETE → flash en destino
 // ============================================================
 document.addEventListener('DOMContentLoaded', function() {
 
-    // ===== 1. Reset password =====
+    // ===== 1. Reset password (empleado: a SU correo / guardia: al correo del operador) =====
     document.querySelectorAll('.sca-form-reset').forEach(form => {
         form.addEventListener('submit', async function(e) {
             e.preventDefault();
             const nombre = this.dataset.nombre;
             const email = this.dataset.email || '(sin correo)';
+            const esGuardia = this.dataset.esGuardia === '1';
+            const debeCambiar = this.dataset.debeCambiar === '1';
+
+            // M3 v2: confirmación diferenciada, con variante de REENVÍO cuando
+            // el guardia aún no cambia su temporal (cubre el caso "el correo
+            // de credenciales falló al crear la cuenta"). Valores escapados.
+            const mensaje = esGuardia
+                ? (debeCambiar
+                    ? `<strong>${esc(nombre)}</strong> aún no cambia su contraseña temporal.<br><br>Se generará una <strong>nueva contraseña temporal</strong> y se enviará a <strong>SU correo</strong>:<br><code>${esc(email)}</code><br><br><small class="text-muted">Se cerrarán sus kioskos activos y el guardia deberá cambiarla en su primer acceso al panel web.</small>`
+                    : `Se generará una contraseña temporal para el guardia <strong>${esc(nombre)}</strong> y se enviará a <strong>SU correo</strong>:<br><br><code>${esc(email)}</code><br><br><small class="text-muted">Se cerrarán sus kioskos activos y deberá cambiar la contraseña al iniciar sesión en el panel web.</small>`)
+                : `Se enviará una nueva contraseña temporal a <strong>${esc(nombre)}</strong>.<br><br>Correo: <code>${esc(email)}</code><br><br><small class="text-muted">El usuario deberá cambiarla al iniciar sesión.</small>`;
 
             ScaModal.confirm({
-                titulo: '¿Resetear contraseña?',
-                mensaje: `Se enviará una nueva contraseña temporal a <strong>${nombre}</strong>.<br><br>Correo: <code>${email}</code><br><br><small class="text-muted">El usuario deberá cambiarla al iniciar sesión.</small>`,
+                titulo: (esGuardia && debeCambiar) ? '¿Reenviar credenciales?' : (esGuardia ? '¿Resetear contraseña del guardia?' : '¿Resetear contraseña?'),
+                mensaje: mensaje,
                 tipo: 'warning',
-                textoConfirmar: 'Sí, resetear',
+                textoConfirmar: (esGuardia && debeCambiar) ? 'Sí, reenviar' : 'Sí, resetear',
                 textoCancelar: 'Cancelar',
                 onConfirm: async () => {
-                    ScaModal.loading('Enviando correo', 'Generando contraseña temporal y enviando a ' + email + '...');
+                    ScaModal.loading(
+                        esGuardia ? 'Enviando a su correo' : 'Enviando correo',
+                        'Generando contraseña temporal y enviando a ' + email + '...'
+                    );
 
                     try {
                         const res = await fetch(form.action, {
@@ -216,123 +242,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // ===== 1b. Cambiar contraseña de guardia =====
-    document.querySelectorAll('.sca-form-pass-guardia').forEach(form => {
-        form.addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const nombre = this.dataset.nombre;
-            const username = this.dataset.username;
-
-            // Modal con input para la nueva contraseña + confirmación.
-            // ScaModal.confirm no soporta 2 inputs, así que usamos un success/info
-            // con HTML custom que incluye los inputs y un botón que valida y envía.
-            ScaModal.confirm({
-                titulo: '¿Cambiar contraseña del guardia?',
-                mensaje: `<div class="text-start">
-                    <div class="mb-3">Guardia: <strong>${nombre}</strong> (${username})</div>
-                    <div class="mb-3">
-                        <label class="form-label">Nueva contraseña <span class="text-danger">*</span></label>
-                        <div class="input-group">
-                            <input type="password" id="sca-pass-guardia" class="form-control" placeholder="Mínimo 8 caracteres" required>
-                            <button class="btn btn-outline-secondary sca-toggle-pass" type="button" data-target="sca-pass-guardia" title="Mostrar/ocultar">
-                                <i class="bi bi-eye"></i>
-                            </button>
-                        </div>
-                        <div class="form-text">Mínimo 8, 1 mayúscula, 1 minúscula, 1 número, 1 símbolo.</div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Confirmar contraseña <span class="text-danger">*</span></label>
-                        <div class="input-group">
-                            <input type="password" id="sca-pass-guardia-conf" class="form-control" placeholder="Repetir contraseña" required>
-                            <button class="btn btn-outline-secondary sca-toggle-pass" type="button" data-target="sca-pass-guardia-conf" title="Mostrar/ocultar">
-                                <i class="bi bi-eye"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>`,
-                tipo: 'warning',
-                textoConfirmar: 'Sí, cambiar',
-                textoCancelar: 'Cancelar',
-                requiereInput: { type: 'text', label: '__dummy__', required: false },  // hack para que muestre el footer con confirm
-                onConfirm: async () => {
-                    const pass1 = document.getElementById('sca-pass-guardia').value;
-                    const pass2 = document.getElementById('sca-pass-guardia-conf').value;
-
-                    if (!pass1 || !pass2) {
-                        ScaModal.warning('Campos vacíos', 'Por favor completá ambas contraseñas.');
-                        return;
-                    }
-                    if (pass1 !== pass2) {
-                        ScaModal.error('Las contraseñas no coinciden', 'Asegurate de escribir la misma contraseña en ambos campos.');
-                        return;
-                    }
-                    if (pass1.length < 8) {
-                        ScaModal.warning('Contraseña muy corta', 'La contraseña debe tener al menos 8 caracteres.');
-                        return;
-                    }
-
-                    // Mostrar loading
-                    ScaModal.loading('Guardando contraseña', 'Actualizando contraseña del guardia...');
-
-                    try {
-                        // Enviar con FormData (incluye los campos que el controller espera)
-                        const formData = new FormData(form);
-                        formData.append('password', pass1);
-                        formData.append('password_confirmation', pass2);
-
-                        const res = await fetch(form.action, {
-                            method: 'POST',
-                            headers: {
-                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
-                                'Accept': 'application/json',
-                            },
-                            body: formData,
-                        });
-                        const data = await res.json();
-
-                        if (data.success) {
-                            // Option E: NO cerrar loading. Redirect directo.
-                            window.location.href = data.redirect;
-                        } else if (data.errors) {
-                            ScaModal.close();
-                            const errores = Object.values(data.errors).flat();
-                            ScaModal.error('Error de validación', errores.join('<br>'));
-                        } else {
-                            ScaModal.close();
-                            ScaModal.error(data.titulo || 'Error', data.mensaje || 'No se pudo cambiar la contraseña.');
-                        }
-                    } catch(err) {
-                        ScaModal.close();
-                        ScaModal.error('Error de conexión', 'No se pudo contactar con el servidor.');
-                    }
-                }
-            });
-
-            // ScaModal.confirm con requiereInput crea un textarea oculto. Lo ocultamos.
-            setTimeout(() => {
-                const input = document.getElementById('scaInput');
-                if (input) {
-                    input.closest('.sca-input').style.display = 'none';
-                }
-                // M2: Activar toggles de "ver contraseña" dentro del modal
-                document.querySelectorAll('.sca-toggle-pass').forEach(btn => {
-                    btn.addEventListener('click', function() {
-                        const target = document.getElementById(this.dataset.target);
-                        if (!target) return;
-                        const icon = this.querySelector('i');
-                        if (target.type === 'password') {
-                            target.type = 'text';
-                            icon.className = 'bi bi-eye-slash';
-                        } else {
-                            target.type = 'password';
-                            icon.className = 'bi bi-eye';
-                        }
-                    });
-                });
-            }, 50);
-        });
-    });
-
     // ===== 2. Desactivar usuario =====
     document.querySelectorAll('.sca-form-destroy').forEach(form => {
         form.addEventListener('submit', async function(e) {
@@ -342,7 +251,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             ScaModal.confirm({
                 titulo: '¿Desactivar usuario?',
-                mensaje: `El usuario <strong>${nombre}</strong> (${username}) será desactivado.<br>No podrá iniciar sesión hasta ser reactivado.<br><br><small class="text-muted">Podrá reactivarse cuando sea necesario.</small>`,
+                mensaje: `El usuario <strong>${esc(nombre)}</strong> (${esc(username)}) será desactivado.<br>No podrá iniciar sesión hasta ser reactivado.<br><br><small class="text-muted">Podrá reactivarse cuando sea necesario.</small>`,
                 tipo: 'danger',
                 textoConfirmar: 'Sí, desactivar',
                 textoCancelar: 'Cancelar',

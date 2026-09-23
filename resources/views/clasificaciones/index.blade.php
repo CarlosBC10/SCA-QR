@@ -29,17 +29,6 @@
     </div>
 </div>
 
-<div class="alert alert-info d-flex align-items-center">
-    <i class="bi bi-info-circle-fill me-3 fs-4"></i>
-    <div>
-        <strong>Importante:</strong> La planta del empleado se deriva de esta
-        configuración en tiempo real. Si cambian la clasificación de un empleado
-        en sitec, el próximo escaneo ya usa la nueva planta.
-        <strong>CORPORATIVO no se mapea</strong> — los corporativos acceden por
-        su tipo de empleado (RN-01).
-    </div>
-</div>
-
 {{-- ============================================================
     M2 [ScaModal + UI] — Tabla rediseñada con cards visuales
     ============================================================ --}}

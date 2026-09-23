@@ -7,7 +7,7 @@
 <div class="sca-error-screen">
     <div class="sca-error-card">
         <div class="sca-error-icon"><i class="bi bi-compass" aria-hidden="true"></i></div>
-        <div class="sca-kicker">Sistema de Control de Accesos mediante QR</div>
+        <div class="sca-kicker">Sistema de Control de Accesos</div>
         <div class="sca-error-code">404</div>
         <h1>Página no encontrada</h1>
         <p>La página que buscas no existe o ya no está disponible.</p>

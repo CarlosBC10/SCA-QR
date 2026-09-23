@@ -103,13 +103,14 @@ class CredencialService
     }
 
     /**
-     * Convierte el logo a base64 para que Browsershot lo pueda cargar.
-    */
+     * Convierte el logo del sistema a base64 para que Browsershot
+     * lo pueda cargar. Antes se usaba el logo de la empresa (Fruitex).
+     */
     private static function generarLogoBase64(): ?string
     {
-        $logoPath = public_path('logo-fruitex.png');
+        $logoPath = public_path('logos/scaqr_logo.png');
         if (file_exists($logoPath)) {
-            return base64_encode(file_get_contents($logoPath));
+            return 'data:image/png;base64,' . base64_encode(file_get_contents($logoPath));
         }
         return null;
     }

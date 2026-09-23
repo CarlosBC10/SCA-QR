@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Registro inicial · Sistema de Control de Accesos mediante QR</title>
+    <title>Registro inicial · Sistema de Control de Accesos mediante</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
     <link rel="stylesheet" href="{{ asset('css/sca-ui.css') }}">
@@ -165,11 +165,11 @@
     <div class="register-container">
         <div class="register-card">
             <div class="card-header">
-                <div class="register-brand-stack" aria-label="SCA-QR y Fruitex de México">
-                    <div class="register-sca-logo"><img src="{{ asset('logo-sca-qr.svg') }}" alt="SCA-QR · Sistema de Control de Accesos"></div>
+                <div class="register-brand-stack" aria-label="SCA">
+                    <div class="register-sca-logo"><img src="{{ asset('logo-sca-qr.svg') }}" alt="SCA · Sistema de Control de Accesos"></div>
                     <div class="register-fruitex-logo"><img src="{{ asset('logo-fruitex.png') }}" alt="Fruitex de México"></div>
                 </div>
-                <h4>Sistema de Control de Accesos mediante QR</h4>
+                <h4>Sistema de Control de Accesos mediante</h4>
                 <p>Registro del Superadmin</p>
             </div>
             <div class="card-body">

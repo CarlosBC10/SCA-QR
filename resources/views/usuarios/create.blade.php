@@ -132,39 +132,67 @@
     <div class="tab-pane fade" id="guardia" role="tabpanel">
         <div class="card border-0 shadow-sm">
             <div class="card-body">
-                {{-- M2 [ScaModal] — Form de crear guardia. Agregamos id para que el JS lo intercepte.
-                    Los guardias NO reciben correo. El admin define la contraseña directamente. --}}
+                {{-- M3 — Verificación de guardias existentes ANTES del alta.
+                    Busca por CURP (exacta o prefijo), ID G-XXXX o nombre.
+                    Auto-verificación al completar los 18 caracteres de la CURP del form. --}}
+                <div class="mb-4 p-3 border rounded-3 bg-light">
+                    <label class="form-label fw-bold"><i class="bi bi-search"></i> Verificar si el guardia ya existe</label>
+                    <div class="input-group">
+                        <input type="text" id="buscar-guardia-q" class="form-control" maxlength="40" placeholder="CURP completa o parcial, ID (G-0001) o nombre">
+                        <button type="button" class="btn btn-outline-success" id="btnBuscarGuardia">
+                            <i class="bi bi-search"></i> Buscar
+                        </button>
+                    </div>
+                    <div class="form-text">Si el guardia ya está registrado, aparecerá aquí con su estado y podrá editar su cuenta en lugar de duplicarlo.</div>
+                    <div id="resultadoGuardia" class="mt-2"></div>
+                </div>
+
+                {{-- M3 [ScaModal] — Form de crear guardia. Agregamos id para que el JS lo intercepte.
+                    Username: AUTOGENERADO (readonly, vista previa referencial).
+                    Contraseña: TEMPORAL autogenerada, enviada por correo al CREADOR.
+                    El guardia la cambia en su primer login. --}}
                 <form method="POST" action="{{ route('usuarios.store.guardia') }}" id="form-create-guardia">
                     @csrf
 
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label class="form-label">Usuario del guardia</label>
-                            <input type="text" name="id_guardia" class="form-control" required pattern="G-\d{4,5}" maxlength="10" value="{{ old('id_guardia') }}" placeholder="Ej: G-0001">
-                            <div class="form-text">Formato: G- seguido de 4 o 5 dígitos. Este será su usuario para iniciar sesión.</div>
+                            <label class="form-label">Usuario del guardia (automático)</label>
+                            <div class="input-group">
+                                <input type="text" id="username-guardia-preview" class="form-control bg-light font-monospace" readonly value="G-????">
+                                <button type="button" class="btn btn-outline-success" id="btnGenUsername" title="Generar vista previa de nuevo">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                            </div>
+                            <div class="form-text">Se asigna automáticamente al guardar. La vista previa es referencial: si otro administrador crea un guardia antes, el sistema asignará el siguiente disponible y lo verá en la confirmación.</div>
                         </div>
 
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Nombre completo del guardia</label>
-                            <input type="text" name="nombre_completo" class="form-control" required maxlength="200" value="{{ old('nombre_completo') }}">
+                            <input type="text" name="nombre_completo" class="form-control @error('nombre_completo') is-invalid @enderror" required maxlength="200" value="{{ old('nombre_completo') }}">
+                            @error('nombre_completo')
+                                <div class="invalid-feedback d-block">{{ $message }}</div>
+                            @enderror
                         </div>
                         <div class="col-md-6 mb-3">
                             <label class="form-label">CURP <span class="text-danger">*</span></label>
-                            <input type="text" name="curp" class="form-control @error('curp') is-invalid @enderror" required maxlength="18" value="{{ old('curp') }}" oninput="this.value = this.value.toUpperCase()" placeholder="18 caracteres">
+                            <input type="text" name="curp" id="curp-guardia-form" class="form-control @error('curp') is-invalid @enderror" required maxlength="18" value="{{ old('curp') }}" oninput="this.value = this.value.toUpperCase(); verificarCurpAuto()" placeholder="18 caracteres">
                             @error('curp')
                                 <div class="invalid-feedback d-block">{{ $message }}</div>
                             @enderror
-                            <div class="form-text">Debe ser única. 18 caracteres exactos.</div>
+                            <div class="form-text">Debe ser única. Al completar los 18 caracteres se verifica automáticamente si ya existe.</div>
                         </div>
 
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Planta asignada</label>
-                            <select name="id_planta" class="form-select" required>
+                            <select name="id_planta" class="form-select @error('id_planta') is-invalid @enderror" required>
                                 <option value="">Seleccionar...</option>
                                 @foreach($plantas as $p)
                                     <option value="{{ $p->id_planta }}" @if(old('id_planta')==$p->id_planta) selected @endif>{{ $p->nombre }}</option>
                                 @endforeach
                             </select>
+                            @error('id_planta')
+                                <div class="invalid-feedback d-block">{{ $message }}</div>
+                            @enderror
                         </div>
 
                         {{-- M2: Rol fijo en Guardia (el controller lo fuerza así).
@@ -178,29 +206,17 @@
                             </div>
                         </div>
 
-                        {{-- M2 [ScaModal] — Contraseña definida por el admin (no temporal, no correo) --}}
+                        {{-- M3: Contraseña temporal automática. Se genera en el servidor,
+                            se envía al correo del CREADOR y el guardia la cambia en su
+                            primer login. No se captura ni se muestra en pantalla. --}}
                         <div class="col-md-6 mb-3">
-                            <label class="form-label">Contraseña <span class="text-danger">*</span></label>
-                            <div class="input-group">
-                                <input type="password" name="password" id="pass-guardia-create" class="form-control @error('password') is-invalid @enderror" required minlength="8" value="{{ old('password') }}">
-                                <button class="btn btn-outline-secondary sca-toggle-pass" type="button" data-target="pass-guardia-create" title="Mostrar/ocultar">
-                                    <i class="bi bi-eye"></i>
-                                </button>
+                            <label class="form-label">Contraseña</label>
+                            <div class="form-control bg-light d-flex align-items-center">
+                                <span class="badge bg-warning text-dark"><i class="bi bi-shield-lock"></i> Temporal automática</span>
+                                <i class="bi bi-envelope-fill text-muted ms-2"></i>
+                                <small class="text-muted ms-2">Se envía a su correo al crear</small>
                             </div>
-                            @error('password')
-                                <div class="invalid-feedback d-block">{{ $message }}</div>
-                            @enderror
-                            <div class="form-text">Mínimo 8 caracteres, 1 mayúscula, 1 minúscula, 1 número y 1 símbolo. Entréguela personalmente al guardia.</div>
-                        </div>
-
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Confirmar contraseña <span class="text-danger">*</span></label>
-                            <div class="input-group">
-                                <input type="password" name="password_confirmation" id="pass-guardia-create-conf" class="form-control" required minlength="8" value="{{ old('password_confirmation') }}">
-                                <button class="btn btn-outline-secondary sca-toggle-pass" type="button" data-target="pass-guardia-create-conf" title="Mostrar/ocultar">
-                                    <i class="bi bi-eye"></i>
-                                </button>
-                            </div>
+                            <div class="form-text">El sistema genera una contraseña temporal y la envía a <strong>su correo</strong>. Usted la entrega al guardia, quien deberá cambiarla al iniciar sesión en el panel web.</div>
                         </div>
                     </div>
 
@@ -218,6 +234,13 @@
 
 @push('scripts')
 <script>
+// M3 v2: escape de valores dinámicos antes de inyectarlos con innerHTML.
+// Los datos vienen de BD (nombre, CURP, planta, puesto...) y no se debe
+// asumir que jamás contendrán HTML. esc() cubre texto y atributos.
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+}[c]));
+
 // FIX H: Búsqueda de empleado por ID o nombre (palabras no consecutivas)
 document.getElementById('btnBuscar').addEventListener('click', async function() {
     const q = document.getElementById('id_empleado').value.trim();
@@ -268,17 +291,17 @@ document.getElementById('btnBuscar').addEventListener('click', async function() 
             resultadosDiv.innerHTML = empleados.map(e => `
                 <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
                     <div>
-                        <strong>${e.nombre}</strong>
-                        <small class="text-muted d-block">ID: ${e.id} · ${e.puesto || 'Sin puesto'} · ${e.planta || 'Sin planta'}</small>
+                        <strong>${esc(e.nombre)}</strong>
+                        <small class="text-muted d-block">ID: ${esc(e.id)} · ${esc(e.puesto || 'Sin puesto')} · ${esc(e.planta || 'Sin planta')}</small>
                     </div>
-                    <button type="button" class="btn btn-sm btn-outline-success" onclick='seleccionarEmpleado(${JSON.stringify(e)})'>
+                    <button type="button" class="btn btn-sm btn-outline-success" onclick='seleccionarEmpleado(${esc(JSON.stringify(e))})'>
                         <i class="bi bi-check"></i> Seleccionar
                     </button>
                 </div>
             `).join('');
         }
     } catch (err) {
-        resultadosDiv.innerHTML = `<div class="alert alert-danger py-2 small">Error al buscar: ${err.message}</div>`;
+        resultadosDiv.innerHTML = `<div class="alert alert-danger py-2 small">Error al buscar: ${esc(err.message)}</div>`;
     }
 });
 
@@ -289,9 +312,9 @@ function seleccionarEmpleado(e) {
         if (!e.encontrado) {
             ScaModal.warning('Empleado no encontrado', 'No se encontró el empleado en la base de datos de sitec. Verificá el ID o buscá por nombre.');
         } else if (!e.activo) {
-            ScaModal.warning('Empleado inactivo', `El empleado <strong>${e.nombre}</strong> no tiene estatus "Alta" en sitec. Solo los empleados activos pueden tener cuenta de usuario.`);
+            ScaModal.warning('Empleado inactivo', `El empleado <strong>${esc(e.nombre)}</strong> no tiene estatus "Alta" en sitec. Solo los empleados activos pueden tener cuenta de usuario.`);
         } else if (e.tiene_cuenta) {
-            ScaModal.warning('Ya tiene cuenta', `El empleado <strong>${e.nombre}</strong> ya tiene una cuenta de usuario asociada.`);
+            ScaModal.warning('Ya tiene cuenta', `El empleado <strong>${esc(e.nombre)}</strong> ya tiene una cuenta de usuario asociada.`);
         }
         return;
     }
@@ -379,7 +402,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // ===== 2. Crear guardia =====
+    // ===== 2. Crear guardia (M3: username autogenerado + contraseña temporal por correo) =====
     const formGuardia = document.getElementById('form-create-guardia');
     if (formGuardia) {
         formGuardia.addEventListener('submit', async function(e) {
@@ -389,11 +412,9 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Procesando...';
 
-            // Guardar la contraseña ANTES de enviar para mostrarla en el success
-            const passIngresada = document.getElementById('pass-guardia-create').value;
-
-            // Mostrar loading
-            ScaModal.loading('Creando guardia', 'Creando registro de guardia y usuario...');
+            // M3: no hay contraseña en el form — el servidor la genera y envía
+            // al correo del creador. El loading cubre el envío del correo.
+            ScaModal.loading('Creando guardia', 'Generando contraseña temporal y enviándola a su correo...');
 
             try {
                 const res = await fetch(formGuardia.action, {
@@ -408,11 +429,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 if (data.success) {
                     // Option E: NO cerrar loading. Redirect directo.
-                    // Guardamos la contraseña en sessionStorage para mostrarla en el success
-                    // del destino (usuarios.index) vía flash modificado.
-                    if (passIngresada) {
-                        sessionStorage.setItem('sca_pass_guardia_creado', passIngresada);
-                    }
                     window.location.href = data.redirect;
                 } else {
                     ScaModal.close();
@@ -434,21 +450,97 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // ===== 3. Toggles "ver contraseña" en el form de crear guardia =====
-    document.querySelectorAll('.sca-toggle-pass').forEach(btn => {
-        btn.addEventListener('click', function() {
-            const target = document.getElementById(this.dataset.target);
-            if (!target) return;
-            const icon = this.querySelector('i');
-            if (target.type === 'password') {
-                target.type = 'text';
-                icon.className = 'bi bi-eye-slash';
-            } else {
-                target.type = 'password';
-                icon.className = 'bi bi-eye';
+    // ===== 3. M3: Vista previa del username autogenerado (G-XXXX) =====
+    const previewUsername = document.getElementById('username-guardia-preview');
+    if (previewUsername) {
+        const cargarPreview = async () => {
+            try {
+                const res = await fetch("{{ route('usuarios.next-guardia') }}");
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data.username) previewUsername.value = data.username;
+            } catch(e) { /* la vista previa es cosmética; si falla, queda G-???? */ }
+        };
+        cargarPreview();
+        document.getElementById('btnGenUsername').addEventListener('click', cargarPreview);
+    }
+
+    // ===== 4. M3: Búsqueda de guardias existentes (CURP / G-XXXX / nombre) =====
+    const btnBuscarGuardia = document.getElementById('btnBuscarGuardia');
+    if (btnBuscarGuardia) {
+        const buscarGuardias = async (q) => {
+            const cont = document.getElementById('resultadoGuardia');
+            q = (q || '').trim();
+            if (!q) {
+                cont.innerHTML = '<div class="alert alert-secondary py-2 small mb-0">Escriba una CURP, un ID (G-0001) o un nombre para buscar.</div>';
+                return;
             }
+            cont.innerHTML = '<div class="alert alert-info py-2 small mb-0"><span class="spinner-border spinner-border-sm"></span> Buscando...</div>';
+            try {
+                const res = await fetch(`{{ route('usuarios.buscar.guardia') }}?q=${encodeURIComponent(q)}`);
+                if (!res.ok) throw new Error('Error del servidor');
+                const guardias = await res.json();
+                renderizarGuardias(Array.isArray(guardias) ? guardias : []);
+            } catch(err) {
+                cont.innerHTML = `<div class="alert alert-danger py-2 small mb-0">Error al buscar: ${esc(err.message)}</div>`;
+            }
+        };
+
+        const renderizarGuardias = (guardias) => {
+            const cont = document.getElementById('resultadoGuardia');
+
+            if (guardias.length === 0) {
+                cont.innerHTML = '<div class="alert alert-success py-2 small mb-0"><i class="bi bi-check-circle-fill"></i> No existe ningún guardia con ese dato. Puede continuar con el registro.</div>';
+                return;
+            }
+
+            cont.innerHTML = guardias.map(g => {
+                const estado = g.activo
+                    ? '<span class="badge bg-success">Activo</span>'
+                    : `<span class="badge bg-secondary">Baja${g.fecha_baja ? ' (' + esc(g.fecha_baja) + ')' : ''}</span>`;
+                const cuenta = g.tiene_cuenta
+                    ? (g.cuenta_activa
+                        ? '<span class="badge bg-info text-dark">Cuenta activa</span>'
+                        : '<span class="badge bg-secondary">Cuenta inactiva</span>')
+                    : '<span class="badge bg-light text-dark border">Sin cuenta web</span>';
+                const passPendiente = g.debe_cambiar
+                    ? ' <span class="badge bg-warning text-dark">Debe cambiar contraseña</span>'
+                    : '';
+                const editar = g.edit_url
+                    ? `<a href="${esc(g.edit_url)}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i> Editar cuenta</a>`
+                    : '';
+                const reactivarHint = !g.activo
+                    ? '<div class="small text-muted mt-1">El guardia está dado de baja. Si vuelve, edite su cuenta para reactivarlo en lugar de crear uno nuevo.</div>'
+                    : '';
+                return `<div class="alert alert-warning py-2 small mb-2">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div>
+                            <strong>${esc(g.nombre)}</strong> <code>${esc(g.id)}</code> · ${esc(g.planta || 'Sin planta')}<br>
+                            <span class="text-muted">CURP: ${esc(g.curp || '—')}</span><br>
+                            ${estado} ${cuenta}${passPendiente}
+                            ${reactivarHint}
+                        </div>
+                        <div>${editar}</div>
+                    </div>
+                </div>`;
+            }).join('');
+        };
+
+        btnBuscarGuardia.addEventListener('click', () => {
+            buscarGuardias(document.getElementById('buscar-guardia-q').value);
         });
-    });
+        document.getElementById('buscar-guardia-q').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); buscarGuardias(e.target.value); }
+        });
+
+        // Auto-verificación al completar 18 chars en el CURP del form
+        window.verificarCurpAuto = function() {
+            const curp = document.getElementById('curp-guardia-form');
+            if (curp && curp.value.trim().length === 18) {
+                buscarGuardias(curp.value.trim());
+            }
+        };
+    }
 
 });
 </script>

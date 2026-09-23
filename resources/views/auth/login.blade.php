@@ -11,7 +11,7 @@
 --}}
 @extends('layouts.app')
 
-@section('title', 'Acceso · Sistema de Control de Accesos mediante QR')
+@section('title', 'Acceso · Sistema de Control de Accesos mediante')
 
 @section('content')
 <style>
@@ -46,7 +46,7 @@
     .login-fruit-cluster .cluster-pina { position: absolute; left: 0; bottom: 0; width: 176px; height: 229px; opacity: 0.92; transform: rotate(-10deg); filter: drop-shadow(0 12px 22px rgba(0,0,0,0.35)); }
     .login-fruit-cluster .cluster-manzana { position: absolute; right: 6px; bottom: 46px; width: 86px; height: 95px; opacity: 0.9; transform: rotate(-12deg); filter: drop-shadow(0 8px 16px rgba(0,0,0,0.3)); }
 
-    /* Línea de escaneo — guiño a la cámara QR del kiosco SCA */
+    /* Línea de escaneo — guiño a la cámara del kiosco SCA */
     .login-scanline {
         position: absolute; left: 0; right: 0; height: 2px; z-index: 1; pointer-events: none;
         background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
@@ -287,17 +287,17 @@
 
         <div class="login-scanline"></div>
         <div class="login-brand-inner">
-            <div class="login-brand-stack" aria-label="SCA-QR y Fruitex de México">
+            <div class="login-brand-stack" aria-label="SCA">
                 <div class="login-brand-logo-sca">
-                    <img src="{{ asset('logos/scaqr_logo.png') }}" alt="SCA-QR · Sistema de Control de Accesos">
+                    <img src="{{ asset('logos/scaqr_logo.png') }}" alt="SCA · Sistema de Control de Accesos">
                 </div>
             </div>
 
-            <p class="login-subtitle">Sistema de Control de Accesos mediante QR</p>
+            <p class="login-subtitle">Sistema de Control de Accesos mediante</p>
 
             <ul class="login-features">
                 <li><i class="bi bi-check-circle-fill"></i> Registro de entradas y salidas en tiempo real</li>
-                <li><i class="bi bi-check-circle-fill"></i> Escaneo QR y bitácora automática</li>
+                <li><i class="bi bi-check-circle-fill"></i> Escaneo y bitácora automática</li>
                 <li><i class="bi bi-check-circle-fill"></i> Control por planta, turno y personal</li>
             </ul>
 
@@ -355,7 +355,7 @@
                     </a>
                 </div>
             </form>
-            <p class="login-form-footer">&copy; {{ date('Y') }} SCA-QR &middot; Fruitex de México</p>
+            <p class="login-form-footer">&copy; {{ date('Y') }} SCA</p>
         </div>
     </div>
 </div>

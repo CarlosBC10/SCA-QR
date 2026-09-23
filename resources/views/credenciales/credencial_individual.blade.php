@@ -487,14 +487,14 @@
 
             @if($logoBase64)
                 <img
-                    src="data:image/png;base64,{{ $logoBase64 }}"
+                    src="{{ $logoBase64 }}"
                     class="logo"
-                    alt="FRUITEX DE MÉXICO"
+                    alt="SCA · Sistema de Control de Accesos"
                 >
             @endif
 
             <div class="titulo">
-                CREDENCIAL DE ACCESO · SCA-QR
+                PASE DE ACCESO · SCA
             </div>
 
         </div>
@@ -578,11 +578,7 @@
         <div class="footer">
 
             <div class="footer-texto">
-                PRESENTE ESTA CREDENCIAL PARA SU ACCESO.
-            </div>
-
-            <div class="footer-direccion">
-                {{ $solicitud->plantaDestino?->direccion ?? 'N/A' }}
+                PRESENTE ESTR PASE QR PARA SU ACCESO.
             </div>
 
         </div>

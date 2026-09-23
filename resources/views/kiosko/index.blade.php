@@ -233,8 +233,7 @@
         @if(file_exists(public_path('logo-empresa.png')))
             <img src="{{ asset('logo-empresa.png') }}" alt="Fruitex de México" class="kiosko-brand-logo">
         @endif
-        <div class="kiosko-eyebrow" style="color:#fff;">Fruitex de México</div>
-        <h1 class="kiosko-title" style="color:#fff;">SCA-QR</h1>
+        <h1 class="kiosko-title" style="color:#fff;">SCA</h1>
         <p class="kiosko-subtitle" style="color:#fff; margin-bottom: 0.5rem;">Acerque su credencial al escáner</p>
 
         <div class="mode-badge">
@@ -323,7 +322,7 @@
         <p class="kiosko-subtitle" style="margin-top: 1rem; opacity: 0.7; font-size: clamp(0.8rem, 2vw, 1rem);">Redirigiendo al login...</p>
     </div>
 
-    <div class="kiosko-brand-footer">Fruitex de México &middot; Sistema SCA-QR</div>
+    <div class="kiosko-brand-footer">Fruitex de México &middot; Sistema SCA</div>
 </div>
 
 <div class="camera-floating" id="camera-view">

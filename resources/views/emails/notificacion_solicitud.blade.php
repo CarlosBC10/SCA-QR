@@ -1,7 +1,7 @@
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
     <div style="background: linear-gradient(135deg, #1b5e20, #2e7d32); padding: 25px; border-radius: 12px 12px 0 0; text-align: center;">
         <h1 style="color: #fff; margin: 0; font-size: 22px;">Fruitex de México</h1>
-        <p style="color: #c8e6c9; margin: 5px 0 0 0; font-size: 14px;">Sistema SCA-QR</p>
+        <p style="color: #c8e6c9; margin: 5px 0 0 0; font-size: 14px;">Sistema SCA</p>
     </div>
 
     <div style="background: #f9f9f9; padding: 25px; border: 1px solid #ddd; border-radius: 0 0 12px 12px;">

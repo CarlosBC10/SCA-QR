@@ -157,7 +157,7 @@
         }
 
         /* ============================================================
-           BRANDING SIDEBAR — SCA-QR
+           BRANDING SIDEBAR — SCA
            ------------------------------------------------------------
            El sidebar utiliza únicamente la identidad del sistema.
            El logotipo de Fruitex NO se muestra en esta zona.
@@ -188,7 +188,7 @@
         }
 
         /*
-         * Logo principal SCA-QR.
+         * Logo principal SCA.
          *
          * El PNG contiene la identidad visual y textual del sistema,
          * por eso no se coloca dentro de una segunda tarjeta.
@@ -919,7 +919,7 @@
     <link rel="stylesheet" href="{{ asset('css/sca-ui.css') }}">
     <link rel="stylesheet" href="{{ asset('css/sca-prototype.css') }}">
 
-    {{-- ===== ScaQR Branding v6 — favicon set ===== --}}
+    {{-- ===== Sca Branding v6 — favicon set ===== --}}
     <link rel="icon" type="image/x-icon" href="{{ asset('favicon.ico') }}">
     <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('icons/favicon-16x16.png') }}">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('icons/favicon-32x32.png') }}">
@@ -960,7 +960,7 @@
     <aside class="sidebar" id="sidebar" aria-label="Navegación principal">
 
         {{-- ========================================================
-             BRANDING SCA-QR
+             BRANDING SCA
              --------------------------------------------------------
              Se utiliza únicamente el logo del sistema.
              El logo de la empresa ya no se muestra aquí.
@@ -968,11 +968,11 @@
         <div class="sidebar-brand">
             <a href="{{ url('/') }}"
                class="sidebar-brand-link"
-               aria-label="SCA-QR - Ir al inicio">
+               aria-label="SCA - Ir al inicio">
 
                 <img
                     src="{{ asset('logos/scaqr_logo.png') }}"
-                    alt="SCA-QR · Sistema de Control de Accesos"
+                    alt="SCA · Sistema de Control de Accesos"
                     class="sidebar-sca-logo-main"
                 >
 
@@ -1212,7 +1212,7 @@
 
             {{-- Footer compacto --}}
             <div class="sidebar-footer">
-                <span>SCA-QR · v1.0</span>
+                <span>SCA · v1.0</span>
                 <small>&copy; {{ date('Y') }} Fruitex de México</small>
             </div>
 
@@ -1248,7 +1248,7 @@
                     </div>
 
                     <div>
-                        <strong>SCA-QR</strong>
+                        <strong>SCA</strong>
                         <span>Control de accesos</span>
                     </div>
                 </div>
