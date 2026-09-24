@@ -1195,21 +1195,6 @@
 
         </nav>
 
-        <!-- ========================================================
-             ZONA INFERIOR
-             --------------------------------------------------------
-             No se muestra logo de empresa.
-             ======================================================== -->
-        <div class="sidebar-bottom">
-
-            {{-- Estado de sesión --}}
-            <div class="sidebar-session">
-                <span class="sidebar-status">
-                    <span class="status-dot"></span>
-                    <span>Sesión activa</span>
-                </span>
-            </div>
-
             {{-- Footer compacto --}}
             <div class="sidebar-footer">
                 <span>SCA · v1.0</span>

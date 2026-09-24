@@ -88,6 +88,19 @@
                     </select>
                 </div>
 
+                {{-- FIX I-10 (edición): correo institucional — solo empleados internos (los guardias
+                     reciben sus credenciales al correo del operador, no manejan correo propio) --}}
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Correo Institucional</label>
+                    <input type="email" name="email_emp" class="form-control @error('email_emp') is-invalid @enderror" maxlength="100" value="{{ old('email_emp', $usuario->email_emp) }}" placeholder="correo@empresa.com" required>
+                    @error('email_emp')
+                        <div class="invalid-feedback">{{ $message }}</div>
+                    @enderror
+                    <div class="form-text text-muted">
+                        <i class="bi bi-info-circle"></i> Se usa para el reseteo de contraseña y notificaciones.
+                    </div>
+                </div>
+
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Planta base</label>
                     @php

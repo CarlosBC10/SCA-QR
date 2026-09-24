@@ -28,6 +28,11 @@ class UpdateUsuarioRequest extends FormRequest
             'password'      => ['nullable', 'string', Password::min(8)->mixedCase()->numbers()->symbols()],
             // id_planta solo aplica a guardias; se valida en el controlador
             'planta_id'     => ['nullable', 'integer', 'exists:plantas,id_planta'],
+
+            // FIX I-10 (edición): permitir agregar/corregir el correo institucional.
+            // Nullable porque los guardias no manejan correo propio (sus credenciales
+            // se envían al correo del operador que los crea).
+            'email_emp'     => ['nullable', 'email', 'max:100'],
         ];
     }
 

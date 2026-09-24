@@ -165,11 +165,7 @@
     <div class="register-container">
         <div class="register-card">
             <div class="card-header">
-                <div class="register-brand-stack" aria-label="SCA">
-                    <div class="register-sca-logo"><img src="{{ asset('logo-sca-qr.svg') }}" alt="SCA · Sistema de Control de Accesos"></div>
-                    <div class="register-fruitex-logo"><img src="{{ asset('logo-fruitex.png') }}" alt="Fruitex de México"></div>
-                </div>
-                <h4>Sistema de Control de Accesos mediante</h4>
+                <h4>Sistema de Control de Accesos - SCA</h4>
                 <p>Registro del Superadmin</p>
             </div>
             <div class="card-body">
@@ -194,6 +190,14 @@
                             <input type="text" name="id_empleado" class="form-control" placeholder="Ingrese ID de empleado" required autofocus>
                         </div>
                         <div class="form-text ms-1">Debe existir en la base de datos de empleados.</div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="form-label">Correo Institucional</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-envelope-fill"></i></span>
+                            <input type="email" name="email_emp" class="form-control" placeholder="correo@empresa.com" required maxlength="100" value="{{ old('email_emp') }}">
+                        </div>
+                        <div class="form-text ms-1">Necesario para recuperar la contraseña y recibir notificaciones.</div>
                     </div>
                     <div class="mb-4">
                         <label class="form-label">Contraseña</label>

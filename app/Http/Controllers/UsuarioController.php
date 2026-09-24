@@ -114,23 +114,38 @@ class UsuarioController extends Controller
             });
         }
 
-        // Scoping del Aprobador: solo ve usuarios de su planta
+        // ── Scoping de visibilidad por rol del visor ──────────────────────
+        // Superadmin: ve todos. Admin: ve todos menos Superadmin.
+        // Aprobador: solo Aprobador/Empleado/Guardia de su planta (y a sí mismo).
         $user = $request->user();
+
+        $rolesVisibles = match (true) {
+            $user->isSuperadmin() => ['Superadmin', 'Admin', 'Aprobador', 'Empleado', 'Guardia'],
+            $user->isAdmin()      => ['Admin', 'Aprobador', 'Empleado', 'Guardia'],
+            default               => ['Aprobador', 'Empleado', 'Guardia'],
+        };
+        $query->whereHas('rol', fn($r) => $r->whereIn('nombre', $rolesVisibles));
+
+        // Aprobador: además, solo usuarios de su planta (o su propia cuenta)
         if ($user->isAprobador()) {
             $plantaId = $user->planta_id;
-            $query->where(function ($q) use ($plantaId) {
-                $q->whereHas('guardia', fn($g) => $g->where('id_planta', $plantaId))
-                  ->orWhereIn('username', function ($sub) use ($plantaId) {
-                      $sub->select('empleado_id')
-                          ->from('empleados_ext_sca')
-                          ->where('id_planta', $plantaId);
+            $query->where(function ($q) use ($plantaId, $user) {
+                $q->where('id_usuario_sca', $user->id_usuario_sca)
+                  ->orWhere(function ($q2) use ($plantaId) {
+                      $q2->whereHas('guardia', fn($g) => $g->where('id_planta', $plantaId))
+                         ->orWhereIn('username', function ($sub) use ($plantaId) {
+                             $sub->select('empleado_id')
+                                 ->from('empleados_ext_sca')
+                                 ->where('id_planta', $plantaId);
+                         });
                   });
             });
         }
 
         $usuarios = $query->orderBy('fecha_alta', 'desc')->paginate(15);
 
-        $roles = RolSca::orderBy('id_rol')->get();
+        // El dropdown de filtro solo ofrece los roles que el visor puede ver
+        $roles = RolSca::whereIn('nombre', $rolesVisibles)->orderBy('id_rol')->get();
         $plantas = Planta::where('activa', true)->orderBy('nombre')->get();
 
         return view('usuarios.index', compact('usuarios', 'roles', 'plantas'));
@@ -675,6 +690,12 @@ class UsuarioController extends Controller
         // Cambio de contraseña (si se proporcionó)
         if ($request->filled('password')) {
             $datos['password'] = Hash::make($request->password);
+        }
+
+        // FIX I-10 (edición): agregar/corregir correo institucional.
+        // Solo para empleados internos: los guardias no manejan correo propio.
+        if (!$usuario->esGuardia() && $request->filled('email_emp')) {
+            $datos['email_emp'] = strtolower(trim($request->email_emp));
         }
 
         // Gestión de estado activo/inactivo via fecha_baja

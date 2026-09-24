@@ -40,7 +40,7 @@ class PasswordGuardiaMail extends Mailable
     {
         $asunto = $this->contexto === 'crear'
             ? 'Credenciales del guardia ' . $this->nombreGuardia . 'SCA'
-            : 'Nueva contraseña temporal del guardia ' . $this->nombreGuardia . 'SCA';
+            : 'Nueva contraseña temporal del guardia ' . $this->nombreGuardia;
         return new Envelope(
             subject: $asunto,
         );

@@ -115,6 +115,7 @@ class LoginController extends Controller
 
         UsuarioSca::create([
             'username'    => (string) $request->id_empleado,
+            'email_emp'   => strtolower(trim($request->email_emp)), // FIX I-10: correo obligatorio desde el registro inicial
             'password'    => Hash::make($request->password),
             'id_rol'      => $rolSuperadmin->id_rol,
         ]);
