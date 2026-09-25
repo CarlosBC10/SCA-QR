@@ -27,6 +27,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use App\Models\Bitacora;
@@ -70,58 +71,91 @@ class ScannerController extends Controller
      * al kiosko. Un guardia puede tener múltiples kioskos activos
      * (entrada en un monitor, salida en otro, etc.).
      */
-    public function activarKiosko(Request $request)
-    {
-        // FIX B-1: Ya no pedimos 'id_planta' en el form. Se usa la del guardia.
-        $credentials = $request->validate([
-            'username'  => ['required', 'string'],
-            'password'  => ['required', 'string'],
-            'modo'      => ['required', 'in:entrada,salida,mixto'],
-        ]);
-
-        // Buscar usuario por username
-        $usuario = UsuarioSca::where('username', $credentials['username'])->first();
-
-        // Validar credenciales y que sea guardia activo
-        if (!$usuario
-            || !password_verify($credentials['password'], $usuario->password)
-            || !$usuario->activo
-            || !$usuario->esGuardia()
-        ) {
-            return back()
-                ->withErrors(['username' => 'Credenciales inválidas o usuario no autorizado.'])
-                ->withInput();
-        }
-
-        $guardia = $usuario->guardia;
-        if (!$guardia || !$guardia->activo) {
-            return back()
-                ->withErrors(['username' => 'Guardia inactivo. Contacte al administrador.'])
-                ->withInput();
-        }
-
-        if (!$guardia->id_planta) {
-            return back()
-                ->withErrors(['username' => 'El guardia no tiene planta asignada. Contacte al administrador.'])
-                ->withInput();
-        }
-
-        // Crear el turno_guardia usando la planta del guardia automáticamente
-        $turno = TurnoGuardia::create([
-            'id_guardia'         => $guardia->id_guardia,
-            'id_planta'          => $guardia->id_planta, // FIX B-1: Planta automática
-            'modo'               => $credentials['modo'],
-            'fecha_hora_inicio'  => now(),
-        ]);
-
-        // Log de auditoría
-        LogSistema::registrar(
-            'INICIO_TURNO_GUARDIA',
-            "Kiosko activado en planta {$guardia->id_planta} (Modo: {$credentials['modo']}) por guardia {$usuario->username}"
-        );
-
-        return redirect()->route('kiosko.show', $turno->id_turno_guardia);
+public function activarKiosko(Request $request)
+{
+    // ============================================================
+    // FIX SEGURIDAD (auditoría kiosko): rate limit idéntico al del
+    // login (5 intentos/min por IP+username). Antes esta vía pública
+    // permitía fuerza bruta contra credenciales de guardia sin límite.
+    // ============================================================
+    $throttleKey = 'kiosko-activar|' . strtolower($request->ip() . '|' . $request->input('username', ''));
+    if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
+        $seconds = RateLimiter::availableIn($throttleKey);
+        return back()->withErrors([
+            'username' => 'Demasiados intentos. Intente en ' . $seconds . ' segundos.',
+        ])->withInput();
     }
+
+    // FIX B-1: Ya no pedimos 'id_planta' en el form. Se usa la del guardia.
+    $credentials = $request->validate([
+        'username'  => ['required', 'string'],
+        'password'  => ['required', 'string'],
+        'modo'      => ['required', 'in:entrada,salida,mixto'],
+    ]);
+
+    // Buscar usuario por username
+    $usuario = UsuarioSca::where('username', $credentials['username'])->first();
+
+    // Validar credenciales y que sea guardia activo
+    if (!$usuario
+        || !password_verify($credentials['password'], $usuario->password)
+        || !$usuario->activo
+        || !$usuario->esGuardia()
+    ) {
+        RateLimiter::hit($throttleKey, 60);
+        return back()
+            ->withErrors(['username' => 'Credenciales inválidas o usuario no autorizado.'])
+            ->withInput();
+    }
+
+    $guardia = $usuario->guardia;
+    if (!$guardia || !$guardia->activo) {
+        return back()
+            ->withErrors(['username' => 'Guardia inactivo. Contacte al administrador.'])
+            ->withInput();
+    }
+
+    if (!$guardia->id_planta) {
+        return back()
+            ->withErrors(['username' => 'El guardia no tiene planta asignada. Contacte al administrador.'])
+            ->withInput();
+    }
+
+    // Crear el turno_guardia usando la planta del guardia automáticamente
+    $turno = TurnoGuardia::create([
+        'id_guardia'         => $guardia->id_guardia,
+        'id_planta'          => $guardia->id_planta, // FIX B-1: Planta automática
+        'modo'               => $credentials['modo'],
+        'fecha_hora_inicio'  => now(),
+    ]);
+
+    // ============================================================
+    // FIX SEGURIDAD (auditoría kiosko): registrar en la SESIÓN de este
+    // navegador a qué turnos tiene acceso. Todos los endpoints públicos
+    // del kiosko ahora verifican esta lista. Un atacante remoto que
+    // adivine el id del turno en la URL ya NO puede usar el kiosko,
+    // porque su navegador nunca fue activado por un guardia.
+    //
+    // - Es una LISTA (no un valor único) para no romper el caso de
+    //   varios kioskos abiertos en el mismo navegador (pestañas).
+    // - La sesión ya viaja al navegador del kiosko hoy (el token CSRF
+    //   de /api/scan sale de ella) y va FIRMADA y CIFRADA
+    //   (SESSION_ENCRYPT=true): no se puede falsificar sin la APP_KEY.
+    // - Cero cambios de base de datos.
+    // ============================================================
+    $request->session()->push('kiosko_turnos', (int) $turno->id_turno_guardia);
+    // Bitácoras que ESTE navegador podrá consultar por polling
+    // (se llena en procesarEscaneo). Se reinicia en cada activación.
+    $request->session()->forget('kiosko_bitacoras');
+
+    // Log de auditoría
+    LogSistema::registrar(
+        'INICIO_TURNO_GUARDIA',
+        "Kiosko activado en planta {$guardia->id_planta} (Modo: {$credentials['modo']}) por guardia {$usuario->username}"
+    );
+
+    return redirect()->route('kiosko.show', $turno->id_turno_guardia);
+}
 
     /**
      * Muestra la pantalla del kiosko (pública, sin login).
@@ -136,6 +170,20 @@ class ScannerController extends Controller
         if ($turno->fecha_hora_fin) {
             return redirect()->route('kiosko.activar.form')
                 ->with('kiosko_error', 'Este kiosko ha sido desactivado. Inicie sesión de nuevo.');
+        }
+
+        // ============================================================
+        // FIX SEGURIDAD (auditoría kiosko): el id del turno en la URL ya
+        // NO basta. Solo el navegador que el guardia activó puede ver la
+        // pantalla de escaneo. Antes, cualquiera en la red que adivinara
+        // /kiosko/42 obtenía un kiosko funcional.
+        // Un navegador sin sesión cae al formulario de activación — el
+        // mismo flujo que ya existe para "turno cerrado".
+        // ============================================================
+        $turnosDeEsteNavegador = session('kiosko_turnos', []);
+        if (!in_array((int) $turno->id_turno_guardia, $turnosDeEsteNavegador, true)) {
+            return redirect()->route('kiosko.activar.form')
+                ->with('kiosko_error', 'Este kiosko no está activo en este dispositivo. Inicie sesión de nuevo.');
         }
 
         $turno->load(['guardia', 'planta']);
@@ -154,6 +202,16 @@ class ScannerController extends Controller
      */
     public function salirKiosko(Request $request, TurnoGuardia $turno)
     {
+        // ============================================================
+        // FIX SEGURIDAD (auditoría kiosko): rate limit igual que el login
+        // (5/min por IP+username). Esta vía pública aceptaba intentos
+        // ilimitados contra credenciales de guardia.
+        // ============================================================
+        $throttleKey = 'kiosko-salir|' . strtolower($request->ip() . '|' . $request->input('username', ''));
+        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
+            return back()->withErrors(['username' => 'Demasiados intentos. Intente en unos minutos.'])->withInput();
+        }
+
         $credentials = $request->validate([
             'username' => ['required', 'string'],
             'password' => ['required', 'string'],
@@ -167,6 +225,7 @@ class ScannerController extends Controller
             || !password_verify($credentials['password'], $usuario->password)
             || !$usuario->activo
         ) {
+            RateLimiter::hit($throttleKey, 60);
             return back()->withErrors(['username' => 'Credenciales inválidas.'])->withInput();
         }
 
@@ -181,6 +240,19 @@ class ScannerController extends Controller
         // Cerrar el turno
         $turno->fecha_hora_fin = now();
         $turno->save();
+
+        // ============================================================
+        // FIX SEGURIDAD (auditoría kiosko): quitar el turno de la sesión
+        // de este navegador. Así, aunque alguien reabra la URL del kiosko
+        // cerrado, la verificación de sesión lo manda a la pantalla de
+        // activación. (Si lo cierra un Admin desde su propio navegador,
+        // este filtro es un no-op inofensivo en su sesión.)
+        // ============================================================
+        $turnosRestantes = array_values(array_filter(
+            session('kiosko_turnos', []),
+            fn ($t) => (int) $t !== (int) $turno->id_turno_guardia
+        ));
+        session(['kiosko_turnos' => $turnosRestantes]);
 
         LogSistema::registrar(
             'FIN_KIOSKO',
@@ -200,6 +272,20 @@ class ScannerController extends Controller
      */
     public function kioskoStatus(TurnoGuardia $turno)
     {
+        // ============================================================
+        // FIX SEGURIDAD (auditoría kiosko): sin sesión de kiosko en este
+        // navegador, el turno simplemente "no está activo". No se filtra
+        // nombre del guardia ni planta a terceros que prueben ids.
+        //
+        // El JS del kiosko SOLO lee data.activo (verificado): si recibe
+        // activo=false varias veces seguidas, muestra "El guardia ha
+        // cerrado sesión" y redirige a /kiosko/activar — flujo existente.
+        // ============================================================
+        $turnosDeEsteNavegador = session('kiosko_turnos', []);
+        if (!in_array((int) $turno->id_turno_guardia, $turnosDeEsteNavegador, true)) {
+            return response()->json(['activo' => false]);
+        }
+
         return response()->json([
             'activo'   => $turno->fecha_hora_fin === null,
             'guardia'  => $turno->guardia?->nombre_completo,
@@ -253,6 +339,18 @@ class ScannerController extends Controller
                 return response()->json(['success' => false, 'message' => 'Kiosko desactivado.'], 403);
             }
 
+            // ============================================================
+            // FIX SEGURIDAD (auditoría kiosko): además de un turno válido,
+            // el navegador que escanea debe SER un kiosko activado por un
+            // guardia (lista kiosko_turnos en sesión). Un atacante remoto
+            // que sepa el turno_id recibe exactamente el mismo 403 que si
+            // el kiosko estuviera cerrado (no se filtra información).
+            // ============================================================
+            $turnosDeEsteNavegador = session('kiosko_turnos', []);
+            if (!in_array((int) $turnoId, $turnosDeEsteNavegador, true)) {
+                return response()->json(['success' => false, 'message' => 'Kiosko desactivado.'], 403);
+            }
+
             $plantaId = $turno->id_planta;
             $guardiaId = $turno->id_guardia;
             $modoKiosko = $turno->modo;
@@ -260,10 +358,38 @@ class ScannerController extends Controller
 
         if (str_starts_with($codigo, config('sca_qr.prefijo_qr_externo'))) {
             // Se le pasa $modoKiosko para que respete ENTRADA/SALIDA/MIXTO
-            return $this->procesarExterno($codigo, $origen, $turnoId, $plantaId, $guardiaId, $modoKiosko);
+            return $this->registrarBitacoraSiCorresponde(
+                $this->procesarExterno($codigo, $origen, $turnoId, $plantaId, $guardiaId, $modoKiosko)
+            );
         }
 
-        return $this->procesarEmpleado($codigo, $origen, $turnoId, $plantaId, $guardiaId, $modoKiosko);
+        return $this->registrarBitacoraSiCorresponde(
+            $this->procesarEmpleado($codigo, $origen, $turnoId, $plantaId, $guardiaId, $modoKiosko)
+        );
+    }
+
+    /**
+     * FIX SEGURIDAD (auditoría kiosko):
+     * Si la respuesta de un escaneo público incluye bitacora_id, lo
+     * registra en la sesión de ESTE navegador (máx. 50) para que el
+     * kiosko pueda hacer polling de SU bitácora vía /api/scan/status.
+     * Un atacante ya no puede consultar bitácoras ajenas iterando ids.
+     */
+    private function registrarBitacoraSiCorresponde($response)
+    {
+        // Solo para kioskos públicos (sin usuario autenticado).
+        // El panel del guardia (autenticado) no necesita esta lista.
+        if (!Auth::check() && $response instanceof \Illuminate\Http\JsonResponse) {
+            $data = $response->getData(true);
+            if (is_array($data) && !empty($data['bitacora_id'])) {
+                $ids = session('kiosko_bitacoras', []);
+                $ids[] = (int) $data['bitacora_id'];
+                // Últimas 50, sin duplicados (tamaño mínimo en sesión).
+                $ids = array_slice(array_unique($ids), -50);
+                session(['kiosko_bitacoras' => $ids]);
+            }
+        }
+        return $response;
     }
 
     /**
@@ -1143,6 +1269,24 @@ class ScannerController extends Controller
             return response()->json(['estado' => 'invalido', 'autorizado' => false, 'denegado' => false]);
         }
 
+        // ============================================================
+        // FIX SEGURIDAD (auditoría kiosko): esta ruta era pública y con
+        // ids secuenciales permitía cosechar nombre, puesto, planta y
+        // foto de CUALQUIER acceso autorizado, sin sesión.
+        // Reglas nuevas:
+        //   - Usuario autenticado (panel del guardia): puede consultar.
+        //   - Kiosko público: solo las bitácoras que ÉL generó
+        //     (lista kiosko_bitacoras en sesión, llenada al escanear).
+        // Respuesta de rechazo = la misma 'invalido' que ya existía
+        // para ids inexistentes: no filtra información nueva.
+        // ============================================================
+        if (!Auth::check()) {
+            $bitacorasDeEsteKiosko = session('kiosko_bitacoras', []);
+            if (!in_array((int) $bitacora_id, $bitacorasDeEsteKiosko, true)) {
+                return response()->json(['estado' => 'invalido', 'autorizado' => false, 'denegado' => false]);
+            }
+        }
+
         // FIX datos de acceso: cuando el guardia autoriza una pendiente (justificación
         // o F10), el kiosko detecta el cambio vía polling y llama a mostrarExito().
         // Antes, mostrarExito() recibía datos hardcodeados ('Autorizado', avatar
@@ -1998,6 +2142,31 @@ class ScannerController extends Controller
      */
     public function fotoEmpleado($id)
     {
+        // ============================================================
+        // FIX SEGURIDAD (auditoría kiosko): esta ruta era 100% pública y
+        // permitía enumerar las fotos de TODOS los empleados iterando
+        // /foto-empleado/1, /foto-empleado/2, ... sin ninguna sesión.
+        // Reglas nuevas:
+        //   - Kiosko activado (turnos en sesión) o usuario autenticado
+        //     → foto real (kiosko al escanear, bitácora en detalle, etc.).
+        //   - Cualquier otro navegador → avatar genérico, la MISMA
+        //     respuesta que ya existía para "empleado sin foto":
+        //     ninguna página se rompe, solo deja de filtrar fotos.
+        //   - Rate limit suave (60/min por IP) para evitar cosecha
+        //     masiva incluso desde una sesión válida. Al exceder,
+        //     devuelve el avatar genérico (nunca un error que rompa UI).
+        // ============================================================
+        $esKiosko = count(session('kiosko_turnos', [])) > 0;
+        if (!Auth::check() && !$esKiosko) {
+            return response()->file(public_path('default-avatar.png'));
+        }
+
+        $throttleKey = 'foto-empleado|' . request()->ip();
+        if (RateLimiter::tooManyAttempts($throttleKey, 60)) {
+            return response()->file(public_path('default-avatar.png'));
+        }
+        RateLimiter::hit($throttleKey, 60);
+
         $empleado = Empleado::find($id);
         if (!$empleado || !$empleado->foto) {
             return response()->file(public_path('default-avatar.png'));

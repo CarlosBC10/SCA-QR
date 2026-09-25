@@ -168,7 +168,7 @@ class BitacoraController extends Controller
             echo "\xEF\xBB\xBF";
             echo '<html><head><meta charset="UTF-8"></head><body><table border="1">';
             echo '<tr>';
-            foreach (['Fecha/Hora', 'Movimiento', 'Estado', 'Tipo de acceso', 'Persona', 'ID Persona', 'Clasificación', 'Planta', 'Guardia', 'Justificación', 'Hallazgo F10', 'Incidencias', 'Motivo denegación'] as $head) {
+            foreach (['Fecha/Hora', 'Movimiento', 'Estado', 'Tipo de acceso', 'Persona', 'ID Persona', 'Clasificación', 'Planta', 'Guardia', 'Justificación', 'Hallazgo Encontrado', 'Incidencias', 'Motivo denegación'] as $head) {
                 echo '<th>' . e($head) . '</th>';
             }
             echo '</tr>';

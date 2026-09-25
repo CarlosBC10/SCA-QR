@@ -129,7 +129,7 @@
                         <option value="revision" @selected($incidenciaActual === 'revision')>Revisión</option>
                         <option value="justificacion" @selected($incidenciaActual === 'justificacion')>Justificación</option>
                         {{-- V10.3.11 (P2): incidencia nueva — solo eventos con hallazgo F10 registrado --}}
-                        <option value="hallazgos" @selected($incidenciaActual === 'hallazgos')>Solo hallazgos F10</option>
+                        <option value="hallazgos" @selected($incidenciaActual === 'hallazgos')>Solo hallazgos</option>
                     </select>
                 </div>
 
