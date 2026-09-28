@@ -293,7 +293,7 @@
                 </div>
             </div>
 
-            <p class="login-subtitle">Sistema de Control de Accesos mediante</p>
+            <p class="login-subtitle"><center>Sistema de Control de Accesos</center></p>
 
             <ul class="login-features">
                 <li><i class="bi bi-check-circle-fill"></i> Registro de entradas y salidas en tiempo real</li>

@@ -114,8 +114,6 @@
                         <option value="autorizado" @selected($estadoActual === 'autorizado')>Autorizado</option>
                         <option value="denegado" @selected($estadoActual === 'denegado')>Denegado</option>
                         {{-- V10.3.11 (P6): estados intermedios que la BD sí contiene --}}
-                        <option value="pendiente_revision" @selected($estadoActual === 'pendiente_revision')>Pendiente</option>
-                        <option value="revision_horario" @selected($estadoActual === 'revision_horario')>En revisión</option>
                     </select>
                 </div>
 

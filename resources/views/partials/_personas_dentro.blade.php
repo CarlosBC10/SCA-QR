@@ -4,7 +4,7 @@
         <div>
             <div class="sca-presence-kicker"><i class="bi bi-activity" aria-hidden="true"></i> Estado actual</div>
             <h5 class="mb-0 fw-bold sca-presence-title">Personas dentro</h5>
-            <div class="sca-presence-subtitle">Último acceso autorizado sin salida registrada</div>
+            <div class="sca-presence-subtitle">Último acceso autorizado sin salida registrada.</div>
         </div>
         <span class="sca-presence-count" id="count-dentro-{{ $id ?? 'default' }}" aria-live="polite">0</span>
     </div>

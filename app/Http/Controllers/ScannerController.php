@@ -2107,7 +2107,7 @@ public function activarKiosko(Request $request)
         }
     }
 
-        /**
+    /**
      * Notifica a los guardias en turno que llegó un externo.
      *
      * V5: Misma corrección que el método anterior.
