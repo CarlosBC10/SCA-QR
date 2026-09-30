@@ -28,9 +28,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
-use App\Http\Requests\RegistroInicialRequest;
 use App\Models\UsuarioSca;
-use App\Models\RolSca;
 use App\Models\Sitec\Empleado;
 use App\Models\LogSistema;
 use Illuminate\Http\Request;
@@ -43,94 +41,10 @@ class LoginController extends Controller
 {
     /**
      * Muestra el formulario de login.
-     * Si no hay usuarios en el sistema, redirige al registro inicial del Superadmin.
      */
     public function showLoginForm()
     {
-        if (UsuarioSca::count() === 0) {
-            return redirect()->route('register.initial');
-        }
         return view('auth.login');
-    }
-
-    /**
-     * Muestra el formulario de registro inicial (solo si no hay usuarios).
-     */
-    public function showInitialRegistration()
-    {
-        if (UsuarioSca::count() > 0) {
-            return redirect()->route('login');
-        }
-        return view('auth.register_initial');
-    }
-
-    /**
-     * Procesa el registro del primer Superadmin.
-     * Solo se permite si la tabla usuarios_sca está vacía.
-     *
-     * CAMBIO V4: sin 'activo' => true (la tabla usa fecha_alta con DEFAULT).
-    */
-    public function initialRegistration(RegistroInicialRequest $request)
-    {
-        // Doble verificación: si ya hay usuarios, no permitir
-        if (UsuarioSca::count() > 0) {
-            return redirect()->route('login');
-        }
-
-        // Buscar el empleado en sitec
-        $empleado = Empleado::find($request->id_empleado);
-        if (!$empleado) {
-            throw ValidationException::withMessages([
-                'id_empleado' => 'El numero de empleado no existe en la base de datos.',
-            ]);
-        }
-
-        // El empleado debe tener estatus='Alta' para ser Superadmin
-        if (!$empleado->estaActivo()) {
-            throw ValidationException::withMessages([
-                'id_empleado' => 'El empleado no tiene estatus Alta en sitec.',
-            ]);
-        }
-
-        // V5: Se eliminó la columna 'id_guardias' de usuarios_sca.
-        // El enlace con guardias ahora es por 'username' (no requiere campo separado).
-        // Para empleados internos, el username es simplemente su id_empleado.
-
-        // ⚠️ FIX CRÍTICO C2 (auditoría V6):
-        // Antes este método usaba la variable $rolSuperadmin SIN haberla asignado
-        // previamente (solo existía el `use App\Models\RolSca;` arriba, pero
-        // nunca se hacía RolSca::where(...)->first()). Eso provocaba un fatal
-        // "Undefined variable $rolSuperadmin" en el primer registro, así que
-        // el sistema NUNCA podía inicializarse en una instalación limpia.
-        //
-        // Ahora consultamos el rol 'Superadmin' en la BD. Si no existe (porque
-        // no se corrió el seeder), lanzamos una excepción clara con instrucciones.
-        $rolSuperadmin = RolSca::where('nombre', 'Superadmin')->first();
-        if (!$rolSuperadmin) {
-            throw new \RuntimeException(
-                'No existe el rol "Superadmin" en la tabla roles_sca. '
-                . 'Ejecute el seeder: php artisan db:seed --class=RolesScaSeeder'
-            );
-        }
-
-        UsuarioSca::create([
-            'username'    => (string) $request->id_empleado,
-            'email_emp'   => strtolower(trim($request->email_emp)), // FIX I-10: correo obligatorio desde el registro inicial
-            'password'    => Hash::make($request->password),
-            'id_rol'      => $rolSuperadmin->id_rol,
-        ]);
-
-
-        LogSistema::registrar(
-            'REGISTER_INITIAL',
-            'Registro inicial de Superadmin (empleado ' . $request->id_empleado . ')'
-        );
-
-        // M2 [ScaModal] — Modal verde de éxito en la pantalla de login.
-        return redirect()->route('login')->with(
-            'sca_modal',
-            sca_modal_flash('success', 'Superadmin creado', 'Ahora puede iniciar sesión con sus credenciales.')
-        );
     }
 
     /**

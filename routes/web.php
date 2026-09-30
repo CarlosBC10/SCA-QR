@@ -61,10 +61,6 @@ Route::middleware('guest')->group(function () {
     Route::get('/login', [LoginController::class, 'showLoginForm'])->name('login');
     Route::post('/login', [LoginController::class, 'login']);
 
-    // Registro inicial del primer Superadmin
-    Route::get('/register/initial', [LoginController::class, 'showInitialRegistration'])->name('register.initial');
-    Route::post('/register/initial', [LoginController::class, 'initialRegistration']);
-
     // Login del kiosko (página pública, pero requiere credenciales de guardia)
     // El guardia ingresa username + password + planta + modo.
     Route::get('/kiosko/activar', [ScannerController::class, 'mostrarActivarKiosko'])->name('kiosko.activar.form');
