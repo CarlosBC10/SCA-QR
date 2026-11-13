@@ -1,58 +1,32 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# 🏢 ScaQR V15 - Enterprise Access Control System
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+![PHP](https://img.shields.io/badge/PHP-8.3-777BB4?style=for-the-badge&logo=php&logoColor=white)
+![Laravel](https://img.shields.io/badge/Laravel-13-FF2D20?style=for-the-badge&logo=laravel&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-Dual_DB-005C84?style=for-the-badge&logo=mysql&logoColor=white)
+![JavaScript](https://img.shields.io/badge/JavaScript-Kiosk_Engine-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)
 
-## About Laravel
+ScaQR V15 es la plataforma integral de control de accesos desarrollada para las plantas industriales de Fruitex (Jardín, Sauces y Partidas). Sustituye los registros manuales por un flujo digital automatizado mediante tecnología QR, integrando un panel de administración web, kioskos de escaneo con cámara en tiempo real y una bitácora inmutable para auditoría.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+> **Nota de Privacidad:** Este proyecto es software propietario de uso interno corporativo. Este repositorio funciona como un *Showcase* técnico de la arquitectura, el modelado de datos y las soluciones backend implementadas.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## 🧠 Arquitectura y Soluciones Técnicas
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+* **Conexión de Base de Datos Dual:** Arquitectura diseñada para convivir con sistemas heredados, utilizando una conexión principal `sca` (esquema propio) y una conexión de solo lectura `sitec` para sincronizar en vivo la identidad, puestos y turnos desde el sistema de Recursos Humanos.
+* **Motor de Reglas de Acceso (`AccesoService`):** Lógica de negocio de alta complejidad que evalúa en tiempo real tolerancias de horario, validación de turnos nocturnos cruzados con la medianoche, continuidad de mapeo de plantas y permisos activos, resolviendo accesos sin realizar escrituras prematuras en la base de datos.
+* **Máquina de Estados en Puerta (Kiosko):** Frontend reactivo construido en JavaScript puro que gestiona el hardware de la cámara (`jsQR` a ~10fps con zoom dinámico), implementando *polling* asíncrono para mantener sincronizado el estado de la puerta con las resoluciones en vivo del guardia.
+* **Expiración Lazy y Tareas Programadas:** Combinación de *accessors* puros en Eloquent para la capa de presentación y un *Cron Job* (`sca:expirar-solicitudes`) que corre cada minuto para invalidar QRs y permisos de forma persistente, con salvaguardas algorítmicas para proteger a los usuarios que aún se encuentran dentro de las instalaciones.
+* **Generación Documental Autónoma:** Uso de `Browsershot` (Chrome headless) para renderizar credenciales temporales con códigos QR en alta resolución (PNG) y matrices de impresión en formato PDF, distribuidas automáticamente mediante servicios SMTP.
+* **Seguridad y Auditoría:** Middleware estricto de roles (Superadmin, Admin, Aprobador, Empleado, Guardia), encriptación de sesiones para los kioskos públicos, 5 niveles de *scoping* de datos por planta y registro de auditoría inmutable de todas las decisiones operativas[cite: 1, 2].
 
-## Learning Laravel
+## 💻 Stack Tecnológico
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+* **Backend:** PHP 8.3 estricto, Laravel 13.8.
+* **Base de Datos:** MySQL (Diseño relacional avanzado con llaves lógicas para el cruce de esquemas aislados).
+* **Frontend:** Blade, Tailwind CSS 4, Vite 8, JavaScript (Vanilla para el motor de escaneo de los kioskos).
+* **Integraciones:** `simplesoftwareio/simple-qrcode`, `spatie/browsershot`[cite: 2].
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## 🚀 Mi Rol en el Proyecto
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+Como **Full Stack Developer** e Ingeniero de Sistemas del proyecto, diseñé e implementé la solución *end-to-end*, abarcando desde la estructuración de la base de datos y la creación de los micro-servicios internos (`PresenciaService`, `BitacoraAccesoService`), hasta el desarrollo de las interfaces de usuario segmentadas para los cinco roles operativos. 
 
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
-```
-
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
-
-## Contributing
-
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
-
-## Code of Conduct
-
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+Para garantizar un ciclo de desarrollo ágil y entregas de nivel Enterprise, potencio mi flujo de trabajo utilizando **Inteligencia Artificial**. Esta integración me permite acelerar la refactorización de código, optimizar consultas SQL complejas (como los filtros correlacionados de la bitácora) y diseñar arquitecturas altamente escalables y documentadas.
